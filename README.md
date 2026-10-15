@@ -16,8 +16,10 @@ It is written in Go with [Gio](https://gioui.org), builds without a C compiler, 
 
 - **Drag** the grip on the left edge to move the strip. Its position is remembered per virtual desktop.
 - **Click** a session to bring its terminal to the front. If the terminal is on another virtual desktop, Windows switches to it.
+- **Drag** a session sideways to reorder it. Sessions are grouped by the virtual desktop their terminal is on, in Task View order, so a session moves only within its own desktop's group. The order is shared by every strip.
 - **Right-click** to close.
 - A **ring** marks sessions whose terminal is on the desktop you are looking at. It updates a few seconds after you switch desktop.
+- The blue **badge** after the grip is the number of the desktop the strip sits on, plus its name if you have renamed it in Task View. The small number before each group is that group's desktop.
 
 One strip runs per virtual desktop, so you start one on each desktop where you want it. Starting a second strip on a desktop that already has one does nothing: the new copy exits by itself. The `/lights` skill below does this from inside Claude Code.
 
@@ -56,7 +58,7 @@ To give one project the skill without installing it for every session, copy the 
 
 SessionLights only displays sessions. Something else has to report them: a Claude Code [hook](https://code.claude.com/docs/en/hooks) that writes one JSON file per session and updates it as the session changes state. Without one, the strip just says "no sessions". It was built for the SessionLight hook in [PAI](https://github.com/danielmiessler/LifeOS) (Personal AI Infrastructure) setups, and any hook that writes this format works.
 
-By default it reads `~/.claude/PAI/MEMORY/STATE/session-lights/`; pass `-dir <folder>` to read elsewhere. Each file looks like this:
+By default it reads `~/.claude/LIFEOS/MEMORY/STATE/session-lights/`; pass `-dir <folder>` to read elsewhere. Each file looks like this:
 
 ```json
 {
@@ -85,7 +87,7 @@ By default it reads `~/.claude/PAI/MEMORY/STATE/session-lights/`; pass `-dir <fo
 
 A file without a `pid` is hidden once it hasn't been modified for 30 minutes. Files are re-read as soon as they change, and a half-written file is skipped until the next write.
 
-Saved positions go next to the lights folder, as `session-lights-go-<desktop-id>.json`.
+Saved positions go next to the lights folder, as `session-lights-go-<desktop-id>.json`, and the dragged order as `session-lights-order.json`.
 
 ## Flags
 
@@ -95,7 +97,7 @@ Saved positions go next to the lights folder, as `session-lights-go-<desktop-id>
 ## Notes for hacking on it
 
 - `lights.go` is the platform-neutral view model and is covered by `go test`.
-- `win_windows.go` is the Windows glue: process checks, `IVirtualDesktopManager`, focusing and positioning.
+- `win_windows.go` is the Windows glue: process checks, `IVirtualDesktopManager`, focusing and positioning. Desktop order and names are not in that interface, so they come from Explorer's `VirtualDesktops` registry key.
 - `ui.go` is the Gio layout, and `main.go` wires it together.
 - Build with `GOARCH=amd64` spelled out if your environment might set another architecture; a 32-bit build fails at runtime.
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -40,15 +41,18 @@ type Box struct {
 	Dot    color.NRGBA
 	HWND   int64
 	OnHere bool
+	Desk   int // 1-based virtual desktop number; 0 when unknown
 }
 
 // View is the whole strip. Empty means "no sessions".
 type View struct {
-	Boxes []Box
+	Boxes    []Box
+	Here     int    // number of the desktop this strip sits on; 0 when unknown
+	HereName string // that desktop's name, when it has been given one
 }
 
 func (v View) Equal(o View) bool {
-	if len(v.Boxes) != len(o.Boxes) {
+	if v.Here != o.Here || v.HereName != o.HereName || len(v.Boxes) != len(o.Boxes) {
 		return false
 	}
 	for i := range v.Boxes {
@@ -88,9 +92,27 @@ type Proc interface {
 	Info(pid int) (alive bool, exe string, startMs int64)
 }
 
-// Desktops answers whether a window is on the desktop in front of you.
+// Desktops answers which virtual desktop a window is on.
 type Desktops interface {
 	OnCurrent(hwnd int64) bool
+	// DesktopOf is the id of the desktop hwnd lives on, "" when unknown.
+	DesktopOf(hwnd int64) string
+}
+
+// DeskInfo is the desktops in the order Task View shows them, by id.
+type DeskInfo struct {
+	IDs   []string
+	Names map[string]string
+}
+
+// Number is the 1-based position of desktop id, 0 when it is not listed.
+func (d DeskInfo) Number(id string) int {
+	for i, x := range d.IDs {
+		if strings.EqualFold(x, id) {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // LoadLights reads every light file in dir. A file mid-write is skipped: a
@@ -138,19 +160,32 @@ func Alive(l Light, p Proc, now time.Time) bool {
 		return false
 	}
 	// PIDs are recycled, so the PID existing is not the session existing.
-	// An unreadable name is not evidence either way.
-	if exe != "" && exe != "claude" && exe != "claude.exe" {
+	// PID plus creation time is the exact identity, so when both are known the
+	// name is not consulted: a session that self-updated keeps running under a
+	// renamed binary, and the image path follows the rename.
+	if l.PIDStart != 0 && start != 0 {
+		d := start - l.PIDStart
+		return d > -pidStartSlop && d < pidStartSlop
+	}
+	// No start time to compare: the name is the only guard against a reused
+	// PID. An unreadable name is not evidence either way.
+	if exe != "" && !isClaudeExe(exe) {
 		return false
 	}
-	if l.PIDStart == 0 || start == 0 {
-		return true // cannot compare: never hide a session on a failed probe
-	}
-	d := start - l.PIDStart
-	return d > -pidStartSlop && d < pidStartSlop
+	return true // never hide a session on a failed probe
 }
 
-// BuildView turns light files into the strip's contents.
-func BuildView(lights []Light, p Proc, d Desktops, now time.Time) View {
+// isClaudeExe is the fallback identity check. It accepts a self-updated
+// session too: Claude Code updates by renaming the running binary to
+// claude.exe.old.<ms>.<pid>.
+func isClaudeExe(exe string) bool {
+	return exe == "claude" || exe == "claude.exe" || strings.HasPrefix(exe, "claude.exe.old.")
+}
+
+// BuildView turns light files into the strip's contents, ordered by desktop
+// number, then by the order you dragged them into, then by name. here is the
+// id of the desktop the strip itself sits on.
+func BuildView(lights []Light, p Proc, d Desktops, desks DeskInfo, here string, order []string, now time.Time) View {
 	var boxes []Box
 	for _, l := range lights {
 		if !Alive(l, p, now) {
@@ -169,11 +204,62 @@ func BuildView(lights []Light, p Proc, d Desktops, now time.Time) View {
 		if l.Window != nil && l.Window.HWND != 0 {
 			b.HWND = l.Window.HWND
 			b.OnHere = d.OnCurrent(l.Window.HWND)
+			b.Desk = desks.Number(d.DesktopOf(l.Window.HWND))
 		}
 		boxes = append(boxes, b)
 	}
-	sort.SliceStable(boxes, func(i, j int) bool { return boxes[i].Name < boxes[j].Name })
-	return View{Boxes: boxes}
+	SortBoxes(boxes, order)
+	return View{Boxes: boxes, Here: desks.Number(here), HereName: desks.Names[strings.ToUpper(here)]}
+}
+
+// SortBoxes orders boxes by desktop (unknown last), then by their place in
+// order, then by name. A session missing from order goes after the ones in it.
+func SortBoxes(boxes []Box, order []string) {
+	rank := make(map[string]int, len(order))
+	for i, k := range order {
+		rank[k] = i
+	}
+	pos := func(b Box) int {
+		if r, ok := rank[b.Key]; ok {
+			return r
+		}
+		return len(order)
+	}
+	desk := func(b Box) int {
+		if b.Desk == 0 {
+			return 1 << 30
+		}
+		return b.Desk
+	}
+	sort.SliceStable(boxes, func(i, j int) bool {
+		a, b := boxes[i], boxes[j]
+		if desk(a) != desk(b) {
+			return desk(a) < desk(b)
+		}
+		if pos(a) != pos(b) {
+			return pos(a) < pos(b)
+		}
+		return a.Name < b.Name
+	})
+}
+
+// Move returns keys with key moved to index to. The caller re-sorts, so a
+// move past the edge of its desktop's group just lands at that edge.
+func Move(keys []string, key string, to int) []string {
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k != key {
+			out = append(out, k)
+		}
+	}
+	if to < 0 {
+		to = 0
+	}
+	if to > len(out) {
+		to = len(out)
+	}
+	out = append(out[:to], append([]string{key}, out[to:]...)...)
+	return out
 }
 
 func dotColour(l Light, now time.Time) color.NRGBA {

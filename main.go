@@ -6,7 +6,8 @@
 // a desktop that already shows a strip exits straight away.
 //
 // Drag the grip on the left to move it. Click a session to jump to its
-// terminal. Right-click to close.
+// terminal; drag a session sideways to reorder it within its desktop.
+// Right-click to close.
 package main
 
 import (
@@ -33,7 +34,7 @@ const slowTick = 5 * time.Second
 func main() {
 	home, _ := os.UserHomeDir()
 	// Default: where PAI's SessionLight hook writes. Any producer works.
-	dir := flag.String("dir", filepath.Join(home, ".claude", "PAI", "MEMORY", "STATE", "session-lights"), "light files directory")
+	dir := flag.String("dir", filepath.Join(home, ".claude", "LIFEOS", "MEMORY", "STATE", "session-lights"), "light files directory")
 	logFile := flag.String("log", "", "write a debug log (frame count, events) to this file")
 	flag.Parse()
 
@@ -77,6 +78,7 @@ type strip struct {
 
 	mu      sync.Mutex
 	hwnd    uintptr
+	deskID  string
 	posFile string
 	lastPos [2]int
 }
@@ -113,6 +115,9 @@ func (s *strip) attach(hwnd uintptr) {
 
 	id := s.desks.DesktopID(hwnd)
 	log.Printf("desktop=%q strip-on-current=%v", id, s.desks.OnCurrent(int64(hwnd)))
+	s.mu.Lock()
+	s.deskID = id
+	s.mu.Unlock()
 	if id == "" {
 		id = "default"
 	}
@@ -134,7 +139,10 @@ func (s *strip) attach(hwnd uintptr) {
 
 // refresh rebuilds the view and redraws only if it changed.
 func (s *strip) refresh() {
-	v := BuildView(LoadLights(s.dir), s.proc, s.desks, time.Now())
+	s.mu.Lock()
+	here := s.deskID
+	s.mu.Unlock()
+	v := BuildView(LoadLights(s.dir), s.proc, s.desks, readDesks(), here, s.loadOrder(), time.Now())
 	if old := s.view.Load(); old != nil && old.Equal(v) {
 		return
 	}
@@ -195,6 +203,37 @@ func (s *strip) focus(hwnd int64) {
 func (s *strip) close() {
 	s.savePosIfMoved()
 	s.w.Perform(system.ActionClose)
+}
+
+// ---- session order, shared by every strip ----------------------------------
+
+// orderFile holds the session ids in the order you dragged them. Every strip
+// reads it, so a reorder shows on the other desktops within the slow tick.
+func (s *strip) orderFile() string {
+	return filepath.Join(s.stateDir, "session-lights-order.json")
+}
+
+func (s *strip) loadOrder() []string {
+	b, err := os.ReadFile(s.orderFile())
+	if err != nil {
+		return nil
+	}
+	var keys []string
+	if json.Unmarshal(b, &keys) != nil {
+		return nil
+	}
+	return keys
+}
+
+// setOrder saves the strip's new order. Only live sessions are written, so
+// ended sessions drop out of the file on the next reorder.
+func (s *strip) setOrder(keys []string) {
+	b, _ := json.Marshal(keys)
+	if err := os.WriteFile(s.orderFile(), b, 0o644); err != nil {
+		log.Printf("save order: %v", err)
+	}
+	s.refresh()
+	s.w.Invalidate()
 }
 
 // ---- position, remembered per desktop ----------------------------------------

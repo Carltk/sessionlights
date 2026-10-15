@@ -15,6 +15,7 @@ import (
 	"gioui.org/font"
 	"gioui.org/font/opentype"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 // Everything here that touches our own window runs on the Gio window thread
@@ -163,6 +164,39 @@ func (d *vdm) DesktopID(hwnd uintptr) string {
 		out <- strings.Trim(g.String(), "{}")
 	}
 	return <-out
+}
+
+// DesktopOf is DesktopID for a session's terminal.
+func (d *vdm) DesktopOf(hwnd int64) string { return d.DesktopID(uintptr(hwnd)) }
+
+// The desktop order and names are not in IVirtualDesktopManager. Explorer
+// keeps them in the registry: VirtualDesktopIDs is the GUIDs back to back in
+// Task View order, and a renamed desktop has a Name value under its GUID.
+const vdKey = `Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops`
+
+func readDesks() DeskInfo {
+	info := DeskInfo{Names: map[string]string{}}
+	k, err := registry.OpenKey(registry.CURRENT_USER, vdKey, registry.QUERY_VALUE)
+	if err != nil {
+		return info
+	}
+	raw, _, err := k.GetBinaryValue("VirtualDesktopIDs")
+	k.Close()
+	if err != nil {
+		return info
+	}
+	for i := 0; i+16 <= len(raw); i += 16 {
+		g := *(*windows.GUID)(unsafe.Pointer(&raw[i])) // same byte layout as the struct
+		id := strings.ToUpper(strings.Trim(g.String(), "{}"))
+		info.IDs = append(info.IDs, id)
+		if nk, err := registry.OpenKey(registry.CURRENT_USER, vdKey+`\Desktops\{`+id+`}`, registry.QUERY_VALUE); err == nil {
+			if name, _, err := nk.GetStringValue("Name"); err == nil && name != "" {
+				info.Names[id] = name
+			}
+			nk.Close()
+		}
+	}
+	return info
 }
 
 // ---- windows -------------------------------------------------------------
