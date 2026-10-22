@@ -145,7 +145,7 @@ func (u *ui) row(gtx layout.Context, v View, origin image.Point) layout.Dimensio
 		add(b.Key, gap, func(gtx layout.Context) layout.Dimensions { return u.box(gtx, b) })
 	}
 	clock := time.Now().Format("15:04")
-	add("", 16, func(gtx layout.Context) layout.Dimensions { return u.label(gtx, clock, 39, colName, true) })
+	add("", 16, func(gtx layout.Context) layout.Dimensions { return u.clock(gtx, clock) })
 
 	h := 0
 	for _, it := range items {
@@ -392,6 +392,30 @@ func keysOf(boxes []Box) []string {
 		out[i] = b.Key
 	}
 	return out
+}
+
+// The clock's face. Bahnschrift's DIN-style digits read well large; it falls
+// back to Segoe UI where the file is missing.
+const (
+	clockFile = "bahnschrift.ttf"
+	clockFace = "Bahnschrift"
+)
+
+// clock draws the time centred on the row but reports no height, so its large
+// type sits in the strip's padding instead of making the panel taller.
+func (u *ui) clock(gtx layout.Context, s string) layout.Dimensions {
+	l := material.Label(u.th, unit.Sp(29), s)
+	l.Color = colName
+	l.MaxLines = 1
+	l.Font.Typeface = clockFace + ",Segoe UI"
+	gtx.Constraints.Min = image.Point{}
+	m := op.Record(gtx.Ops)
+	dims := l.Layout(gtx)
+	call := m.Stop()
+	off := op.Offset(image.Pt(0, -dims.Size.Y/2)).Push(gtx.Ops)
+	call.Add(gtx.Ops)
+	off.Pop()
+	return layout.Dimensions{Size: image.Pt(dims.Size.X, 0)}
 }
 
 func dot(gtx layout.Context, c color.NRGBA) layout.Dimensions {

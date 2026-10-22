@@ -301,13 +301,20 @@ func activate(target int64) bool {
 	return r != 0
 }
 
-// systemFonts loads Segoe UI so the strip matches the rest of Windows.
-// Missing files fall back to Gio's bundled Go fonts.
+// systemFonts loads Segoe UI so the strip matches the rest of Windows, plus
+// the clock's face. Missing files fall back to Gio's bundled Go fonts.
 func systemFonts() []font.FontFace {
 	dir := filepath.Join(os.Getenv("WINDIR"), "Fonts")
 	var faces []font.FontFace
-	for file, w := range map[string]font.Weight{"segoeui.ttf": font.Normal, "seguisb.ttf": font.SemiBold} {
-		b, err := os.ReadFile(filepath.Join(dir, file))
+	for _, f := range []struct {
+		file, typeface string
+		w              font.Weight
+	}{
+		{"segoeui.ttf", "Segoe UI", font.Normal},
+		{"seguisb.ttf", "Segoe UI", font.SemiBold},
+		{clockFile, clockFace, font.Normal},
+	} {
+		b, err := os.ReadFile(filepath.Join(dir, f.file))
 		if err != nil {
 			continue
 		}
@@ -315,7 +322,7 @@ func systemFonts() []font.FontFace {
 		if err != nil {
 			continue
 		}
-		faces = append(faces, font.FontFace{Font: font.Font{Typeface: "Segoe UI", Weight: w}, Face: face})
+		faces = append(faces, font.FontFace{Font: font.Font{Typeface: font.Typeface(f.typeface), Weight: f.w}, Face: face})
 	}
 	return faces
 }
