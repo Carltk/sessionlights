@@ -135,6 +135,7 @@ func (s *strip) attach(hwnd uintptr) {
 	s.refresh()
 	go s.watch()
 	go s.tick()
+	go s.clock()
 }
 
 // refresh rebuilds the view and redraws only if it changed.
@@ -190,6 +191,21 @@ func (s *strip) tick() {
 		if n := s.frames.Load(); n != last {
 			log.Printf("frames=%d", n)
 			last = n
+		}
+	}
+}
+
+// clock redraws when the minute turns, so the time on the strip stays right.
+// It wakes at least every slowTick rather than sleeping a whole minute, so a
+// machine waking from sleep does not show a stale time for long.
+func (s *strip) clock() {
+	shown := time.Now().Format("15:04")
+	for {
+		now := time.Now()
+		time.Sleep(min(now.Truncate(time.Minute).Add(time.Minute).Sub(now), slowTick))
+		if t := time.Now().Format("15:04"); t != shown {
+			shown = t
+			s.w.Invalidate()
 		}
 	}
 }

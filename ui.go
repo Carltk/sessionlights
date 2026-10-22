@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"strconv"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/font"
@@ -143,6 +144,8 @@ func (u *ui) row(gtx layout.Context, v View, origin image.Point) layout.Dimensio
 		b := b
 		add(b.Key, gap, func(gtx layout.Context) layout.Dimensions { return u.box(gtx, b) })
 	}
+	clock := time.Now().Format("15:04")
+	add("", 16, func(gtx layout.Context) layout.Dimensions { return u.label(gtx, clock, 13, colName, true) })
 
 	h := 0
 	for _, it := range items {
