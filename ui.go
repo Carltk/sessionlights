@@ -394,15 +394,17 @@ func keysOf(boxes []Box) []string {
 	return out
 }
 
-// The clock's face. Bahnschrift's DIN-style digits read well large; it falls
-// back to Segoe UI where the file is missing.
+// The clock's face: Segoe UI Light, the thin lock-screen look. It falls back to
+// Segoe UI where the file is missing.
 const (
-	clockFile = "bahnschrift.ttf"
-	clockFace = "Bahnschrift"
+	clockFile = "segoeuil.ttf"
+	clockFace = "Segoe UI Light"
 )
 
 // clock draws the time centred on the row but reports no height, so its large
-// type sits in the strip's padding instead of making the panel taller.
+// type sits in the strip's padding instead of making the panel taller. It
+// centres the digits, not the line box: digits have no descenders, so
+// centring the box would leave them sitting high.
 func (u *ui) clock(gtx layout.Context, s string) layout.Dimensions {
 	l := material.Label(u.th, unit.Sp(29), s)
 	l.Color = colName
@@ -412,7 +414,9 @@ func (u *ui) clock(gtx layout.Context, s string) layout.Dimensions {
 	m := op.Record(gtx.Ops)
 	dims := l.Layout(gtx)
 	call := m.Stop()
-	off := op.Offset(image.Pt(0, -dims.Size.Y/2)).Push(gtx.Ops)
+	digitTop := dims.Size.Y - dims.Baseline - gtx.Sp(29)*7/10 // Segoe's digits stand ~0.7em
+	mid := (digitTop + dims.Size.Y - dims.Baseline) / 2
+	off := op.Offset(image.Pt(0, -mid)).Push(gtx.Ops)
 	call.Add(gtx.Ops)
 	off.Pop()
 	return layout.Dimensions{Size: image.Pt(dims.Size.X, 0)}
