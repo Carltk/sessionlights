@@ -145,7 +145,7 @@ func (u *ui) row(gtx layout.Context, v View, origin image.Point) layout.Dimensio
 		add(b.Key, gap, func(gtx layout.Context) layout.Dimensions { return u.box(gtx, b) })
 	}
 	clock := time.Now().Format("15:04")
-	add("", 16, func(gtx layout.Context) layout.Dimensions { return u.label(gtx, clock, 13, colName, true) })
+	add("", 16, func(gtx layout.Context) layout.Dimensions { return u.label(gtx, clock, 39, colName, true) })
 
 	h := 0
 	for _, it := range items {
