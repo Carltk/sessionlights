@@ -29,6 +29,8 @@ var (
 
 	pSetWindowPos        = user32.NewProc("SetWindowPos")
 	pGetWindowRect       = user32.NewProc("GetWindowRect")
+	pMonitorFromWindow   = user32.NewProc("MonitorFromWindow")
+	pGetMonitorInfoW     = user32.NewProc("GetMonitorInfoW")
 	pEnumWindows         = user32.NewProc("EnumWindows")
 	pGetWindowThreadPID  = user32.NewProc("GetWindowThreadProcessId")
 	pIsWindowVisible     = user32.NewProc("IsWindowVisible")
@@ -51,6 +53,7 @@ const (
 	swpNoZOrder    = 0x0004
 	swpNoActivate  = 0x0010
 	swRestore      = 9
+	monitorNearest = 2
 	coinitMulti    = 0x0
 	clsctxInproc   = 0x1
 	clsctxLocal    = 0x4
@@ -263,6 +266,23 @@ func windowPos(hwnd uintptr) (x, y int, ok bool) {
 	var r struct{ L, T, R, B int32 }
 	res, _, _ := pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
 	return int(r.L), int(r.T), res != 0
+}
+
+// monitorTop is the top of the work area on the monitor hwnd is mostly on, so
+// a taskbar along the top is left uncovered.
+func monitorTop(hwnd uintptr) (int, bool) {
+	m, _, _ := pMonitorFromWindow.Call(hwnd, monitorNearest)
+	if m == 0 {
+		return 0, false
+	}
+	var mi struct {
+		Size      uint32
+		Mon, Work struct{ L, T, R, B int32 }
+		Flags     uint32
+	}
+	mi.Size = uint32(unsafe.Sizeof(mi))
+	res, _, _ := pGetMonitorInfoW.Call(m, uintptr(unsafe.Pointer(&mi)))
+	return int(mi.Work.T), res != 0
 }
 
 func moveWindow(hwnd uintptr, x, y int) {

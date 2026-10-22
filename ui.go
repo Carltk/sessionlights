@@ -97,8 +97,8 @@ func (u *ui) fit(gtx layout.Context, size image.Point) {
 }
 
 func (u *ui) strip(gtx layout.Context, v View) layout.Dimensions {
-	origin := image.Pt(gtx.Dp(6), gtx.Dp(8))
-	return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(6), Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	origin := image.Pt(gtx.Dp(6), gtx.Dp(5))
+	return layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5), Left: unit.Dp(6), Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return u.row(gtx, v, origin)
 	})
 }
@@ -252,7 +252,7 @@ func (u *ui) empty(gtx layout.Context) layout.Dimensions {
 func (u *ui) box(gtx layout.Context, b Box) layout.Dimensions {
 	// Record the content first: the ring and hit area need its size.
 	m := op.Record(gtx.Ops)
-	dims := layout.Inset{Left: unit.Dp(7), Right: unit.Dp(9), Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	dims := layout.Inset{Left: unit.Dp(7), Right: unit.Dp(9), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return dot(gtx, b.Dot) }),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {

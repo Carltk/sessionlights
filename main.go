@@ -31,6 +31,13 @@ import (
 // a terminal being moved to another desktop.
 const slowTick = 5 * time.Second
 
+// A strip let go within snapPx of the top of its monitor snaps flush to it.
+// followTick is how often the position is checked for a finished drag.
+const (
+	snapPx     = 24
+	followTick = 250 * time.Millisecond
+)
+
 func main() {
 	home, _ := os.UserHomeDir()
 	// Default: where PAI's SessionLight hook writes. Any producer works.
@@ -135,6 +142,7 @@ func (s *strip) attach(hwnd uintptr) {
 	s.refresh()
 	go s.watch()
 	go s.tick()
+	go s.follow()
 	go s.clock()
 }
 
@@ -187,11 +195,40 @@ func (s *strip) tick() {
 	last := int64(0)
 	for range time.Tick(slowTick) {
 		s.refresh()
-		s.savePosIfMoved()
 		if n := s.frames.Load(); n != last {
 			log.Printf("frames=%d", n)
 			last = n
 		}
+	}
+}
+
+// follow notices the end of a drag: the position changed, then held still for
+// one beat. GetWindowRect sends no message, so it is safe off the window
+// thread; the move itself goes through w.Run.
+func (s *strip) follow() {
+	var last [2]int
+	moving := true // a restored position near the top snaps too
+	for range time.Tick(followTick) {
+		s.mu.Lock()
+		hwnd := s.hwnd
+		s.mu.Unlock()
+		x, y, ok := windowPos(hwnd)
+		if !ok {
+			continue
+		}
+		if p := [2]int{x, y}; p != last {
+			last, moving = p, true
+			continue
+		}
+		if !moving {
+			continue
+		}
+		moving = false
+		if top, ok := monitorTop(hwnd); ok && y != top && y-top > -snapPx && y-top < snapPx {
+			s.w.Run(func() { moveWindow(hwnd, x, top) })
+			last[1] = top
+		}
+		s.savePosIfMoved()
 	}
 }
 
