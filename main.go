@@ -156,33 +156,40 @@ func (s *strip) attach(hwnd uintptr) {
 	}
 }
 
-// arrive makes desktop id "here": the badge and rings follow it, and the
-// strip moves to the position last saved on that desktop. A pinned strip
-// arrives on every switch; an unpinned one only once, at start.
+// arrive makes desktop id "here": the badge and rings follow it. A pinned
+// strip arrives on every switch but keeps one position for all desktops, so
+// it never moves when you switch; an unpinned one arrives once, at start, and
+// takes the position saved for its own desktop.
 func (s *strip) arrive(id string) {
 	s.mu.Lock()
-	same := id == s.deskID && s.posFile != ""
-	s.mu.Unlock()
-	if same {
-		return
-	}
-	s.savePosIfMoved() // the desktop we are leaving keeps where it was put
-	s.mu.Lock()
+	first := s.posFile == ""
 	s.deskID = id
-	if id == "" {
-		id = "default"
+	if first {
+		key := id
+		if s.vd != "" {
+			key = "pinned"
+		} else if key == "" {
+			key = "default"
+		}
+		s.posFile = filepath.Join(s.stateDir, "session-lights-go-"+key+".json")
 	}
-	s.posFile = filepath.Join(s.stateDir, "session-lights-go-"+id+".json")
 	hwnd := s.hwnd
 	s.mu.Unlock()
 
-	s.w.Run(func() {
-		if x, y, ok := s.loadPos(); ok {
-			moveWindow(hwnd, x, y)
-			log.Printf("restore %d,%d from %s", x, y, s.posFile)
-		}
-		s.lastPos[0], s.lastPos[1], _ = windowPos(hwnd)
-	})
+	if first {
+		s.w.Run(func() {
+			x, y, ok := s.loadPos()
+			if !ok && s.vd != "" && id != "" {
+				// First pinned start: begin where this desktop's strip was.
+				x, y, ok = loadPosFile(filepath.Join(s.stateDir, "session-lights-go-"+id+".json"))
+			}
+			if ok {
+				moveWindow(hwnd, x, y)
+				log.Printf("restore %d,%d", x, y)
+			}
+			s.lastPos[0], s.lastPos[1], _ = windowPos(hwnd)
+		})
+	}
 	s.refresh()
 }
 
@@ -336,12 +343,14 @@ func (s *strip) setOrder(keys []string) {
 	s.w.Invalidate()
 }
 
-// ---- position, remembered per desktop ----------------------------------------
+// ---- position: one for a pinned strip, else one per desktop -----------------
 
 type pos struct{ X, Y int }
 
-func (s *strip) loadPos() (int, int, bool) {
-	b, err := os.ReadFile(s.posFile)
+func (s *strip) loadPos() (int, int, bool) { return loadPosFile(s.posFile) }
+
+func loadPosFile(file string) (int, int, bool) {
+	b, err := os.ReadFile(file)
 	if err != nil {
 		return 0, 0, false
 	}

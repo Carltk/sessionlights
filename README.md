@@ -14,14 +14,14 @@ It is written in Go with [Gio](https://gioui.org), builds without a C compiler, 
 
 ## Using it
 
-- **Drag** the grip on the left edge to move the strip. Its position is remembered per virtual desktop.
+- **Drag** the grip on the left edge to move the strip. A pinned strip keeps one position everywhere; an unpinned one remembers a position per virtual desktop.
 - **Click** a session to bring its terminal to the front. If the terminal is on another virtual desktop, Windows switches to it.
 - **Drag** a session sideways to reorder it. Sessions are grouped by the virtual desktop their terminal is on, in Task View order, so a session moves only within its own desktop's group. The order is shared by every strip.
 - **Right-click** to close.
 - A **ring** marks sessions whose terminal is on the desktop you are looking at. It updates within a second of a switch when pinned (see `-vd`), a few seconds otherwise.
 - The blue **badge** after the grip is the number of the desktop you are looking at (pinned) or the strip sits on (unpinned), plus its name if you have renamed it in Task View. The small number before each group is that group's desktop.
 
-With `-vd` one strip is pinned to every desktop: it follows you, and moves to the position you last left it at on each desktop. Without it, one strip runs per virtual desktop, so you start one on each desktop where you want it. Either way a second strip that would duplicate one does nothing: the new copy exits by itself. The `/lights` skill below does this from inside Claude Code.
+With `-vd` one strip is pinned to every desktop: it follows you and keeps one position for every desktop. Without it, one strip runs per virtual desktop, so you start one on each desktop where you want it. Either way a second strip that would duplicate one does nothing: the new copy exits by itself. The `/lights` skill below does this from inside Claude Code.
 
 ## Install
 
@@ -87,7 +87,7 @@ By default it reads `~/.claude/LIFEOS/MEMORY/STATE/session-lights/`; pass `-dir 
 
 A file without a `pid` is hidden once it hasn't been modified for 30 minutes. Files are re-read as soon as they change, and a half-written file is skipped until the next write.
 
-Saved positions go next to the lights folder, as `session-lights-go-<desktop-id>.json`, and the dragged order as `session-lights-order.json`.
+Saved positions go next to the lights folder, as `session-lights-go-pinned.json` (pinned) or `session-lights-go-<desktop-id>.json`, and the dragged order as `session-lights-order.json`.
 
 ## Flags
 
