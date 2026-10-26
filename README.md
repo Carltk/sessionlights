@@ -18,10 +18,10 @@ It is written in Go with [Gio](https://gioui.org), builds without a C compiler, 
 - **Click** a session to bring its terminal to the front. If the terminal is on another virtual desktop, Windows switches to it.
 - **Drag** a session sideways to reorder it. Sessions are grouped by the virtual desktop their terminal is on, in Task View order, so a session moves only within its own desktop's group. The order is shared by every strip.
 - **Right-click** to close.
-- A **ring** marks sessions whose terminal is on the desktop you are looking at. It updates a few seconds after you switch desktop.
-- The blue **badge** after the grip is the number of the desktop the strip sits on, plus its name if you have renamed it in Task View. The small number before each group is that group's desktop.
+- A **ring** marks sessions whose terminal is on the desktop you are looking at. It updates within a second of a switch when pinned (see `-vd`), a few seconds otherwise.
+- The blue **badge** after the grip is the number of the desktop you are looking at (pinned) or the strip sits on (unpinned), plus its name if you have renamed it in Task View. The small number before each group is that group's desktop.
 
-One strip runs per virtual desktop, so you start one on each desktop where you want it. Starting a second strip on a desktop that already has one does nothing: the new copy exits by itself. The `/lights` skill below does this from inside Claude Code.
+With `-vd` one strip is pinned to every desktop: it follows you, and moves to the position you last left it at on each desktop. Without it, one strip runs per virtual desktop, so you start one on each desktop where you want it. Either way a second strip that would duplicate one does nothing: the new copy exits by itself. The `/lights` skill below does this from inside Claude Code.
 
 ## Install
 
@@ -92,6 +92,7 @@ Saved positions go next to the lights folder, as `session-lights-go-<desktop-id>
 ## Flags
 
 - `-dir <folder>` reads light files from another folder.
+- `-vd <VirtualDesktop.exe>` pins one strip to every desktop and makes clicking a session switch desktop first. It needs [MScholtes/VirtualDesktop](https://github.com/MScholtes/VirtualDesktop): `VirtualDesktop.exe` on Windows 10, `VirtualDesktop11.exe` on Windows 11, `VirtualDesktop11-24H2.exe` on 24H2 and later. The desktop in front is read from Explorer's `SessionInfo<n>VirtualDesktopsCurrentVirtualDesktop` registry value, which Explorer rewrites on every switch.
 - `-log <file>` writes a debug log: the desktop id, position restores, and the frame count every 5 seconds.
 
 ## Notes for hacking on it

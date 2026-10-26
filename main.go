@@ -2,8 +2,11 @@
 // session: one box per session, coloured by what it is doing.
 //
 // It reads one JSON "light" file per session (see README) and redraws only
-// when one changes. One instance runs per virtual desktop; a second launch on
-// a desktop that already shows a strip exits straight away.
+// when one changes. Given -vd (MScholtes VirtualDesktop.exe) it runs as one
+// strip pinned to every desktop, badging the desktop in front and restoring
+// the position saved for it on each switch. Without -vd one instance runs per
+// virtual desktop. Either way a second launch that would duplicate a strip
+// exits straight away.
 //
 // Drag the grip on the left to move it. Click a session to jump to its
 // terminal; drag a session sideways to reorder it within its desktop.
@@ -43,6 +46,7 @@ func main() {
 	// Default: where PAI's SessionLight hook writes. Any producer works.
 	dir := flag.String("dir", filepath.Join(home, ".claude", "LIFEOS", "MEMORY", "STATE", "session-lights"), "light files directory")
 	logFile := flag.String("log", "", "write a debug log (frame count, events) to this file")
+	vd := flag.String("vd", "", "MScholtes VirtualDesktop.exe for this Windows build: pin one strip to every desktop")
 	flag.Parse()
 
 	log.SetOutput(os.Stderr)
@@ -53,14 +57,24 @@ func main() {
 	}
 
 	desks := newDesktops()
-	if stripAlreadyHere(desks) {
-		log.Print("a strip already shows on this desktop; exiting")
+	pinned := *vd != ""
+	if pinned {
+		if _, err := os.Stat(*vd); err != nil {
+			log.Printf("-vd %s: %v; running one strip per desktop", *vd, err)
+			pinned = false
+		}
+	}
+	if stripAlreadyHere(desks, pinned) {
+		log.Print("a strip already shows; exiting")
 		return
 	}
 
 	// Saved positions sit beside the lights directory, never inside it, so
 	// they are not mistaken for light files.
 	s := &strip{dir: *dir, stateDir: filepath.Dir(*dir), desks: desks, proc: winProc{}}
+	if pinned {
+		s.vd = vdExe(*vd)
+	}
 	go func() {
 		w := new(app.Window)
 		// Not app.TopMost: see setTopmost.
@@ -79,6 +93,7 @@ type strip struct {
 	desks         *vdm
 	proc          Proc
 	w             *app.Window
+	vd            vdExe // set: pinned to every desktop
 
 	view   atomic.Pointer[View]
 	frames atomic.Int64
@@ -121,29 +136,54 @@ func (s *strip) attach(hwnd uintptr) {
 	s.mu.Unlock()
 
 	id := s.desks.DesktopID(hwnd)
-	log.Printf("desktop=%q strip-on-current=%v", id, s.desks.OnCurrent(int64(hwnd)))
+	if s.vd != "" {
+		// Pinned, the strip is on every desktop; "here" is the one in front.
+		if err := s.vd.pin(hwnd); err != nil {
+			log.Printf("pin: %v", err)
+		}
+		id = currentDesktop()
+	}
+	log.Printf("desktop=%q pinned=%v", id, s.vd != "")
+	s.w.Run(func() { setTopmost(hwnd) })
+	s.arrive(id)
+
+	go s.watch()
+	go s.tick()
+	go s.follow()
+	go s.clock()
+	if s.vd != "" {
+		go onDesktopSwitch(func() { s.arrive(currentDesktop()) })
+	}
+}
+
+// arrive makes desktop id "here": the badge and rings follow it, and the
+// strip moves to the position last saved on that desktop. A pinned strip
+// arrives on every switch; an unpinned one only once, at start.
+func (s *strip) arrive(id string) {
+	s.mu.Lock()
+	same := id == s.deskID && s.posFile != ""
+	s.mu.Unlock()
+	if same {
+		return
+	}
+	s.savePosIfMoved() // the desktop we are leaving keeps where it was put
 	s.mu.Lock()
 	s.deskID = id
-	s.mu.Unlock()
 	if id == "" {
 		id = "default"
 	}
 	s.posFile = filepath.Join(s.stateDir, "session-lights-go-"+id+".json")
+	hwnd := s.hwnd
+	s.mu.Unlock()
 
 	s.w.Run(func() {
-		setTopmost(hwnd)
 		if x, y, ok := s.loadPos(); ok {
 			moveWindow(hwnd, x, y)
 			log.Printf("restore %d,%d from %s", x, y, s.posFile)
 		}
 		s.lastPos[0], s.lastPos[1], _ = windowPos(hwnd)
 	})
-
 	s.refresh()
-	go s.watch()
-	go s.tick()
-	go s.follow()
-	go s.clock()
 }
 
 // refresh rebuilds the view and redraws only if it changed.
@@ -250,6 +290,13 @@ func (s *strip) clock() {
 // ---- actions from the UI (called off the event goroutine) --------------------
 
 func (s *strip) focus(hwnd int64) {
+	// Switching first makes the jump reliable: SetForegroundWindow alone is
+	// often refused, and then the desktop never changes.
+	if s.vd != "" {
+		if err := s.vd.switchTo(hwnd); err != nil {
+			log.Printf("switch to %d: %v", hwnd, err)
+		}
+	}
 	s.w.Run(func() { activate(hwnd) })
 }
 

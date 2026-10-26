@@ -3,8 +3,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -202,6 +204,80 @@ func readDesks() DeskInfo {
 	return info
 }
 
+// The desktop in front of you is not in IVirtualDesktopManager either.
+// Explorer writes it, per logon session, as CurrentVirtualDesktop under
+// SessionInfo\<session>\VirtualDesktops, and rewrites it on every switch.
+func currentDeskKey() string {
+	var sid uint32
+	if windows.ProcessIdToSessionId(uint32(os.Getpid()), &sid) != nil {
+		sid = 1
+	}
+	return fmt.Sprintf(`Software\Microsoft\Windows\CurrentVersion\Explorer\SessionInfo\%d\VirtualDesktops`, sid)
+}
+
+// currentDesktop is the id of the desktop in front of you, "" when unknown.
+func currentDesktop() string {
+	k, err := registry.OpenKey(registry.CURRENT_USER, currentDeskKey(), registry.QUERY_VALUE)
+	if err != nil {
+		return ""
+	}
+	defer k.Close()
+	raw, _, err := k.GetBinaryValue("CurrentVirtualDesktop")
+	if err != nil || len(raw) != 16 {
+		return ""
+	}
+	g := *(*windows.GUID)(unsafe.Pointer(&raw[0]))
+	return strings.ToUpper(strings.Trim(g.String(), "{}"))
+}
+
+// onDesktopSwitch calls f each time Explorer records a new current desktop.
+// It blocks in RegNotifyChangeKeyValue, so it costs nothing while you stay
+// put; run it on its own goroutine.
+func onDesktopSwitch(f func()) {
+	k, err := registry.OpenKey(registry.CURRENT_USER, currentDeskKey(), registry.NOTIFY|registry.QUERY_VALUE)
+	if err != nil {
+		log.Printf("desktop switch watch: %v", err)
+		return
+	}
+	defer k.Close()
+	for {
+		if err := windows.RegNotifyChangeKeyValue(windows.Handle(k), false, windows.REG_NOTIFY_CHANGE_LAST_SET, 0, false); err != nil {
+			log.Printf("desktop switch watch: %v", err)
+			return
+		}
+		f()
+	}
+}
+
+// ---- VirtualDesktop.exe: what the documented interface cannot do ---------
+
+// vdExe is MScholtes/VirtualDesktop (github.com/MScholtes/VirtualDesktop),
+// the build matching this Windows. It pins our window to every desktop and
+// switches desktops directly. Empty means "not available": the strip then
+// runs one instance per desktop, as it did before.
+type vdExe string
+
+func (v vdExe) run(args ...string) error {
+	if v == "" {
+		return fmt.Errorf("no VirtualDesktop.exe")
+	}
+	cmd := exec.Command(string(v), append([]string{"/q"}, args...)...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	err := cmd.Run()
+	// It answers with the pipeline value as its exit code; only 127 is failure.
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() != 127 {
+		return nil
+	}
+	return err
+}
+
+func (v vdExe) pin(hwnd uintptr) error { return v.run(fmt.Sprintf("/pwh:%d", hwnd)) }
+
+// switchTo brings forward the desktop window hwnd sits on.
+func (v vdExe) switchTo(hwnd int64) error {
+	return v.run(fmt.Sprintf("/gdfwh:%d", hwnd), "/s")
+}
+
 // ---- windows -------------------------------------------------------------
 
 // enumCallbacks are never freed by Go, so build the visitors once and reuse.
@@ -243,11 +319,13 @@ func visible(h uintptr) bool {
 // stripAlreadyHere is true when another process already shows a strip on
 // the desktop in front of you. That includes the WPF strip, which is pinned
 // to every desktop and so is always "here".
-func stripAlreadyHere(d Desktops) bool {
+//
+// anywhere widens it to every desktop: a pinned strip is the only strip.
+func stripAlreadyHere(d Desktops, anywhere bool) bool {
 	me := uint32(os.Getpid())
 	found := false
 	eachWindow(func(h uintptr) bool {
-		if windowPID(h) != me && visible(h) && windowTitle(h) == stripTitle && d.OnCurrent(int64(h)) {
+		if windowPID(h) != me && visible(h) && windowTitle(h) == stripTitle && (anywhere || d.OnCurrent(int64(h))) {
 			found = true
 			return false
 		}
