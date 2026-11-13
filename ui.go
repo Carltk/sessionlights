@@ -284,7 +284,7 @@ func (u *ui) box(gtx layout.Context, b Box) layout.Dimensions {
 	switch {
 	case u.drag.active && u.drag.key == b.Key:
 		pointer.CursorGrabbing.Add(gtx.Ops)
-	case b.HWND != 0:
+	case b.HWND != 0 || b.Attach != "":
 		pointer.CursorPointer.Add(gtx.Ops)
 	}
 	area.Pop()
@@ -356,6 +356,8 @@ func (u *ui) handle(gtx layout.Context, v View) {
 					go u.s.setOrder(d.order)
 				case d.primary && b.HWND != 0:
 					go u.s.focus(b.HWND)
+				case d.primary && b.Attach != "":
+					go u.s.openAttach(b.Attach)
 				}
 				gtx.Execute(op.InvalidateCmd{})
 			case pointer.Cancel:

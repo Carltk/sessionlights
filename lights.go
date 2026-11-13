@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -22,6 +23,9 @@ type Light struct {
 	Window    *Window `json:"window"`
 	PID       int     `json:"pid"`
 	PIDStart  int64   `json:"pidStart"`
+	// AttachID is the Claude Code supervisor's id for a background session,
+	// set by the PAI Session Registry. With no Window, a click runs `ca` on it.
+	AttachID string `json:"attachId"`
 
 	modTime time.Time
 }
@@ -31,6 +35,10 @@ type Window struct {
 	HWND int64 `json:"hwnd"`
 	PID  int   `json:"pid"`
 }
+
+// attachIDRe is the shape of a supervisor id. Anything else is never passed
+// to a command line.
+var attachIDRe = regexp.MustCompile(`^[0-9a-f]{8}$`)
 
 // Box is what the strip draws for one session: everything already decided,
 // so the UI does no thinking and two equal views mean nothing to redraw.
@@ -42,6 +50,8 @@ type Box struct {
 	HWND   int64
 	OnHere bool
 	Desk   int // 1-based virtual desktop number; 0 when unknown
+	// Attach is the supervisor id to `ca` when there is no window to focus.
+	Attach string
 }
 
 // View is the whole strip. Empty means "no sessions".
@@ -201,6 +211,9 @@ func BuildView(lights []Light, p Proc, d Desktops, desks DeskInfo, here string, 
 			sub = l.State
 		}
 		b.Sub = truncate(sub, maxSub)
+		if attachIDRe.MatchString(l.AttachID) {
+			b.Attach = l.AttachID
+		}
 		if l.Window != nil && l.Window.HWND != 0 {
 			b.HWND = l.Window.HWND
 			b.OnHere = d.OnCurrent(l.Window.HWND)

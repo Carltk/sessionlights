@@ -193,3 +193,20 @@ func TestLoadLightsSkipsJunk(t *testing.T) {
 		t.Error("missing dir should give nil")
 	}
 }
+
+func TestBuildViewAttachID(t *testing.T) {
+	now := time.Now()
+	lights := []Light{
+		{SessionID: "a", Name: "A", State: "idle", AttachID: "0fdaa8eb", modTime: now},
+		{SessionID: "b", Name: "B", State: "idle", AttachID: "0fdaa8eb & calc", modTime: now},
+		{SessionID: "c", Name: "C", State: "idle", modTime: now},
+	}
+	v := BuildView(lights, fakeProc{}, fakeDesk{}, DeskInfo{}, "", nil, now)
+	got := map[string]string{}
+	for _, b := range v.Boxes {
+		got[b.Key] = b.Attach
+	}
+	if got["a"] != "0fdaa8eb" || got["b"] != "" || got["c"] != "" {
+		t.Errorf("attach ids: %+v", got)
+	}
+}

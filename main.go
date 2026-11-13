@@ -18,6 +18,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -305,6 +306,23 @@ func (s *strip) focus(hwnd int64) {
 		}
 	}
 	s.w.Run(func() { activate(hwnd) })
+}
+
+// openAttach runs `ca <id>` in a new Windows Terminal tab, for a background
+// session no terminal is attached to. The wrapper registers its own window, so
+// the box moves to this desktop on the next tick.
+func (s *strip) openAttach(id string) {
+	if !attachIDRe.MatchString(id) {
+		return
+	}
+	ca := filepath.Join(s.stateDir, "..", "..", "TOOLS", "ClaudeAttach.cmd")
+	if _, err := os.Stat(ca); err != nil {
+		log.Printf("attach %s: %v", id, err)
+		return
+	}
+	if err := exec.Command("wt.exe", "-w", "0", "nt", "cmd", "/c", ca, id).Start(); err != nil {
+		log.Printf("attach %s: %v", id, err)
+	}
 }
 
 func (s *strip) close() {
