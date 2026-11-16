@@ -24,7 +24,7 @@ type Light struct {
 	PID       int     `json:"pid"`
 	PIDStart  int64   `json:"pidStart"`
 	// AttachID is the Claude Code supervisor's id for a background session,
-	// set by the PAI Session Registry. With no Window, a click runs `ca` on it.
+	// set by a session supervisor. With no Window, a click runs `ca` on it.
 	AttachID string `json:"attachId"`
 
 	modTime time.Time

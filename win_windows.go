@@ -59,7 +59,7 @@ const (
 	coinitMulti    = 0x0
 	clsctxInproc   = 0x1
 	clsctxLocal    = 0x4
-	stripTitle     = "PAI Lights"
+	stripTitle     = "SessionLights"
 	queryLimited   = windows.PROCESS_QUERY_LIMITED_INFORMATION
 	unixEpochIn100 = 116444736000000000 // FILETIME of 1970-01-01
 )

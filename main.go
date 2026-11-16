@@ -1,5 +1,8 @@
-// SessionLights is an always-on-top strip showing the state of every live PAI
-// session: one box per session, coloured by what it is doing.
+// SessionLights is an always-on-top strip showing the state of every live
+// Claude Code session: one box per session, coloured by what it is doing.
+//
+// `sessionlights hook` is the other half: Claude Code runs it on session
+// events and it writes the light files the strip reads (see hook.go).
 //
 // It reads one JSON "light" file per session (see README) and redraws only
 // when one changes. Given -vd (MScholtes VirtualDesktop.exe) it runs as one
@@ -43,9 +46,12 @@ const (
 )
 
 func main() {
-	home, _ := os.UserHomeDir()
-	// Default: where PAI's SessionLight hook writes. Any producer works.
-	dir := flag.String("dir", filepath.Join(home, ".claude", "LIFEOS", "MEMORY", "STATE", "session-lights"), "light files directory")
+	if len(os.Args) > 1 && os.Args[1] == "hook" {
+		runHookMain(winProbe{})
+		return
+	}
+	// Default: where `sessionlights hook` writes. Any producer works.
+	dir := flag.String("dir", lightsDir(), "light files directory")
 	logFile := flag.String("log", "", "write a debug log (frame count, events) to this file")
 	vd := flag.String("vd", "", "MScholtes VirtualDesktop.exe for this Windows build: pin one strip to every desktop")
 	flag.Parse()

@@ -1,0 +1,10 @@
+{
+  "name": "sessionlights",
+  "version": "1.0.0",
+  "description": "An always-on-top Windows strip with one coloured light per Claude Code session: busy, idle, waiting on you, or failed.",
+  "author": { "name": "Carltk", "url": "https://github.com/Carltk" },
+  "homepage": "https://github.com/Carltk/sessionlights",
+  "repository": "https://github.com/Carltk/sessionlights",
+  "license": "MIT",
+  "keywords": ["windows", "status", "sessions", "hooks"]
+}

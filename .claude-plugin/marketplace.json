@@ -1,0 +1,11 @@
+{
+  "name": "sessionlights",
+  "owner": { "name": "Carltk", "url": "https://github.com/Carltk" },
+  "plugins": [
+    {
+      "name": "sessionlights",
+      "source": "./",
+      "description": "An always-on-top Windows strip with one coloured light per Claude Code session."
+    }
+  ]
+}
