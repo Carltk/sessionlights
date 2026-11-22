@@ -25,6 +25,26 @@ With `-vd` one strip is pinned to every desktop: it follows you and keeps one po
 
 Each box is labelled with the session's title if you have given it one with Claude Code's built-in `/rename` (or `claude --name`), otherwise with the folder the session runs in.
 
+## Linux: a stats bar in the top panel
+
+On Linux the same binary is a small system-stats bar in the spirit of [ULBar](https://ulbar.io): CPU, GPU, memory and network as colour-banded numbers, with one dot per live Claude Code session to their left. Wayland lets no app keep a floating window on top, so it lives in the top panel as StatusNotifierItems (GNOME with the AppIndicator extension, which Ubuntu ships enabled; KDE and most Wayland bars also host them).
+
+```
+go build -o ~/.local/bin/sessionlights .
+sessionlights &              # the bar
+sessionlights -once 2s       # print one sample and exit
+sessionlights -png bar.png   # render the bar once to a PNG
+```
+
+| Stat | Source | Colour |
+|---|---|---|
+| CPU | `/proc/stat` deltas | green < 25% · yellow-green < 50% · amber < 75% · red |
+| GPU | DRM fdinfo engine time, busiest engine (Intel, AMD, any driver that reports it); no root | as CPU |
+| MEM | `MemTotal − MemAvailable` | as CPU, by share of total |
+| ↓ ↑ | `/proc/net/dev`, physical interfaces only | download greens brighten with speed; upload runs orange to red |
+
+Every threshold is one constant in `stats.go`. No subprocesses, no network calls: everything is read from `/proc` and `/sys`. `sessionlights hook` works on Linux too and finds the `claude` process from `/proc`.
+
 ## Install as a Claude Code plugin
 
 The repo is a Claude Code [plugin](https://code.claude.com/docs/en/plugins). Inside Claude Code:

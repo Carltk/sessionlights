@@ -300,3 +300,12 @@ func truncate(s string, max int) string {
 	}
 	return string(r[:max-3]) + "..."
 }
+
+// keysOf is the boxes' keys in order.
+func keysOf(boxes []Box) []string {
+	out := make([]string, len(boxes))
+	for i, b := range boxes {
+		out[i] = b.Key
+	}
+	return out
+}

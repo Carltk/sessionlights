@@ -1,3 +1,5 @@
+//go:build windows
+
 package main
 
 import (
@@ -386,14 +388,6 @@ func (u *ui) preview(v View, x float32) []string {
 	boxes := append([]Box(nil), u.ordered(v)...)
 	SortBoxes(boxes, keys)
 	return keysOf(boxes)
-}
-
-func keysOf(boxes []Box) []string {
-	out := make([]string, len(boxes))
-	for i, b := range boxes {
-		out[i] = b.Key
-	}
-	return out
 }
 
 // The clock's face: Segoe UI Light, the thin lock-screen look. It falls back to

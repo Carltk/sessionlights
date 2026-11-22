@@ -1,3 +1,5 @@
+//go:build windows
+
 // SessionLights is an always-on-top strip showing the state of every live
 // Claude Code session: one box per session, coloured by what it is doing.
 //

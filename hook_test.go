@@ -30,7 +30,7 @@ const sid = "0f8e2c1a-5b7d-4e3f-9a61-2d4c8b0e7f13"
 
 func hookEvent(t *testing.T, name string, extra map[string]string) []byte {
 	t.Helper()
-	m := map[string]string{"session_id": sid, "cwd": `C:\code\my-project`, "hook_event_name": name}
+	m := map[string]string{"session_id": sid, "cwd": filepath.Join("code", "my-project"), "hook_event_name": name}
 	for k, v := range extra {
 		m[k] = v
 	}
