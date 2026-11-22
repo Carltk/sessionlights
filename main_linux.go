@@ -2,7 +2,7 @@ package main
 
 // Linux: the bar lives in the top panel as StatusNotifierItems, because
 // Wayland lets no client keep a floating window on top. Stats tick every two
-// seconds; session dots redraw on a light-file change.
+// seconds; session names redraw on a light-file change.
 //
 //	sessionlights            run the bar
 //	sessionlights hook       write a light file from a Claude Code hook event
@@ -14,7 +14,6 @@ import (
 	"flag"
 	"fmt"
 	"image"
-	"image/color"
 	"image/draw"
 	"image/png"
 	"log"
@@ -37,9 +36,9 @@ const (
 // widthTemplates hold each segment's widest likely text, so the item keeps
 // its width while the numbers change.
 var widthTemplates = map[string]segment{
-	segCPU: {Runs: []run{{Text: "CPU 99%"}}},
-	segGPU: {Runs: []run{{Text: "GPU 99%"}}},
-	segMem: {Runs: []run{{Text: "MEM 99.9G"}}},
+	segCPU: {Runs: []run{{Text: "C-99%"}}},
+	segGPU: {Runs: []run{{Text: "G-99%"}}},
+	segMem: {Runs: []run{{Text: "M-99.9/16"}}},
 	segNet: {Runs: []run{{Arrow: -1}, {Text: "999K "}, {Arrow: 1}, {Text: "999K"}}},
 }
 
@@ -95,7 +94,7 @@ type bar struct {
 
 	stats  Stats
 	gpuOK  bool
-	dots   []color.NRGBA
+	sess   segment // session names, coloured by state
 	names  []string
 	items  map[string]*trayItem
 	itemsL []*trayItem
@@ -108,14 +107,14 @@ type bar struct {
 }
 
 func (b *bar) loadLights() {
-	b.dots, b.names = sessionDots(LoadLights(b.dir), b.proc, time.Now())
+	b.sess, b.names = sessionView(LoadLights(b.dir), b.proc, time.Now())
 }
 
 // segments is what to draw, per item key, in bar order.
 func (b *bar) segments() ([]string, map[string]segment) {
 	segs := statSegments(b.stats, b.gpuOK || b.stats.GPU >= 0 || len(b.smp.drmFds) > 0)
-	if len(b.dots) > 0 {
-		segs[segSessions] = segment{Dots: b.dots}
+	if len(b.sess.Runs) > 0 {
+		segs[segSessions] = b.sess
 	}
 	var keys []string
 	for _, k := range segOrder {
@@ -276,7 +275,10 @@ func (b *bar) registerOrder() []*trayItem {
 // because the host caches icons by name. The previous file is kept one round
 // so the host never loads a file that was just deleted.
 func (b *bar) draw() {
-	title := barTitle(b.stats, b.names)
+	// The hover text names the sessions only. Putting the live numbers in it
+	// made every item send a title change each tick, and the host fetches
+	// three properties back for each: most of the bar's idle cost.
+	title := sessionsTitle(b.names)
 	if b.layout != "split" {
 		b.publish("bar", b.items["bar"], b.composite(b.height), title)
 		return

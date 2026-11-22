@@ -3,6 +3,7 @@ package main
 import (
 	"image/color"
 	"testing"
+	"time"
 )
 
 func TestLoadColourBands(t *testing.T) {
@@ -73,5 +74,42 @@ func TestStatSegmentsHideUnreadableGPU(t *testing.T) {
 	}
 	if _, ok := statSegments(Unknown, true)[segGPU]; !ok {
 		t.Error("GPU segment missing with a readable GPU")
+	}
+}
+
+func TestMemText(t *testing.T) {
+	s := Stats{MemUsed: 10095022080, MemTotal: 16467214336} // a 16 GiB laptop
+	if got := memText(s); got != "9.4/16" {
+		t.Fatalf("memText = %q, want 9.4/16", got)
+	}
+	if memText(Stats{}) != "--" {
+		t.Fatal("unknown memory should read --")
+	}
+}
+
+func TestShortName(t *testing.T) {
+	for in, want := range map[string]string{
+		"ULBar stats bar": "ULBar", "Research": "Research", "credentials-vault": "credential",
+		"my-project-name": "my-project", "  padded  ": "padded",
+	} {
+		if got := shortName(in); got != want {
+			t.Errorf("shortName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSessionViewColoursNames(t *testing.T) {
+	now := time.Now()
+	lights := []Light{
+		{SessionID: "b", Name: "zeta", State: "idle", modTime: now},
+		{SessionID: "a", Name: "Alpha build", State: "waiting", modTime: now},
+	}
+	seg, names := sessionView(lights, liveProc{}, now)
+	if len(seg.Runs) != 3 || seg.Runs[0].Text != "Alpha" || seg.Runs[0].Col != colWaiting ||
+		seg.Runs[2].Text != "zeta" || seg.Runs[2].Col != colIdle {
+		t.Fatalf("runs %+v", seg.Runs)
+	}
+	if names[0] != "Alpha build - waiting" {
+		t.Fatalf("names %v", names)
 	}
 }
