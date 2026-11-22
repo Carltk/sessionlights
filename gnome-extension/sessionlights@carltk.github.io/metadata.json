@@ -1,0 +1,8 @@
+{
+  "uuid": "sessionlights@carltk.github.io",
+  "name": "SessionLights focus helper",
+  "description": "Lets the SessionLights top-bar viewer raise the terminal window of a Claude Code session when you click its name. GNOME on Wayland lets no ordinary app raise another app's window, so this exposes one D-Bus method that does: raise the window owned by a process or its nearest ancestor.",
+  "shell-version": ["45", "46", "47", "48", "49"],
+  "url": "https://github.com/Carltk/sessionlights",
+  "version": 1
+}

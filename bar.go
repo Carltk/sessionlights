@@ -5,15 +5,23 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"sort"
 	"strings"
 	"time"
 )
 
-// sessionView is every live session, in name order: a short name in its
-// state colour for the bar, and a full "name - state" line for hover text.
-func sessionView(lights []Light, p Proc, now time.Time) (segment, []string) {
+// sessionBox is one live session as the bar shows it.
+type sessionBox struct {
+	Short string      // the name on the bar
+	Col   color.NRGBA // its state colour
+	Line  string      // "name - state", the hover text
+	PID   int         // the claude process, 0 when unknown
+}
+
+// sessionView is every live session, in name order.
+func sessionView(lights []Light, p Proc, now time.Time) []sessionBox {
 	live := make([]Light, 0, len(lights))
 	for _, l := range lights {
 		if Alive(l, p, now) {
@@ -27,20 +35,20 @@ func sessionView(lights []Light, p Proc, now time.Time) (segment, []string) {
 		}
 		return live[i].SessionID < live[j].SessionID
 	})
-	var seg segment
-	names := make([]string, len(live))
+	out := make([]sessionBox, len(live))
 	for i, l := range live {
 		name := l.Name
 		if name == "" {
 			name = l.SessionID
 		}
-		names[i] = truncate(name, maxName) + " - " + l.State
-		if i > 0 {
-			seg.Runs = append(seg.Runs, run{Text: "  "})
+		out[i] = sessionBox{
+			Short: shortName(name),
+			Col:   dotColour(l, now),
+			Line:  truncate(name, maxName) + " - " + l.State,
+			PID:   l.PID,
 		}
-		seg.Runs = append(seg.Runs, run{Text: shortName(name), Col: dotColour(l, now)})
 	}
-	return seg, names
+	return out
 }
 
 // shortNameLen is how many characters of a session's name the bar shows.
@@ -63,14 +71,11 @@ func shortName(s string) string {
 
 // Segment keys, in bar order.
 const (
-	segSessions = "sessions"
-	segCPU      = "cpu"
-	segGPU      = "gpu"
-	segMem      = "mem"
-	segNet      = "net"
+	segCPU = "cpu"
+	segGPU = "gpu"
+	segMem = "mem"
+	segNet = "net"
 )
-
-var segOrder = []string{segSessions, segCPU, segGPU, segMem, segNet}
 
 // statSegments is each stat as label + banded value. The GPU segment is left
 // out when the GPU cannot be read at all, rather than showing "--" forever.

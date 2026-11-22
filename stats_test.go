@@ -102,14 +102,14 @@ func TestSessionViewColoursNames(t *testing.T) {
 	now := time.Now()
 	lights := []Light{
 		{SessionID: "b", Name: "zeta", State: "idle", modTime: now},
-		{SessionID: "a", Name: "Alpha build", State: "waiting", modTime: now},
+		{SessionID: "a", Name: "Alpha build", State: "waiting", modTime: now, PID: 0},
 	}
-	seg, names := sessionView(lights, liveProc{}, now)
-	if len(seg.Runs) != 3 || seg.Runs[0].Text != "Alpha" || seg.Runs[0].Col != colWaiting ||
-		seg.Runs[2].Text != "zeta" || seg.Runs[2].Col != colIdle {
-		t.Fatalf("runs %+v", seg.Runs)
+	boxes := sessionView(lights, liveProc{}, now)
+	if len(boxes) != 2 || boxes[0].Short != "Alpha" || boxes[0].Col != colWaiting ||
+		boxes[1].Short != "zeta" || boxes[1].Col != colIdle {
+		t.Fatalf("boxes %+v", boxes)
 	}
-	if names[0] != "Alpha build - waiting" {
-		t.Fatalf("names %v", names)
+	if boxes[0].Line != "Alpha build - waiting" {
+		t.Fatalf("line %q", boxes[0].Line)
 	}
 }

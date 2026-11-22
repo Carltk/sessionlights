@@ -5,6 +5,8 @@ package main
 // seconds; session names redraw on a light-file change.
 //
 //	sessionlights            run the bar
+//	sessionlights install    set up the shell extension and autostart (once)
+//	sessionlights uninstall  remove them
 //	sessionlights hook       write a light file from a Claude Code hook event
 //	sessionlights -png f     render the bar once to a PNG and exit
 
@@ -20,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -43,15 +46,32 @@ var widthTemplates = map[string]segment{
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "hook" {
-		runHookMain(newProbe())
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "hook":
+			runHookMain(newProbe())
+			return
+		case "install":
+			fs := flag.NewFlagSet("install", flag.ExitOnError)
+			dir := fs.String("dir", "", "light files directory the autostarted bar should read (default: where `sessionlights hook` writes)")
+			_ = fs.Parse(os.Args[2:])
+			if err := runInstall(*dir); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "uninstall":
+			if err := runUninstall(); err != nil {
+				log.Fatal(err)
+			}
+			return
+		}
 	}
 	dir := flag.String("dir", lightsDir(), "light files directory")
 	layout := flag.String("layout", "split", `"split": one panel item per segment; "one": a single item`)
 	pngOut := flag.String("png", "", "render the bar once to this PNG (at 32 px) and exit")
 	logFile := flag.String("log", "", "write a debug log to this file")
 	once := flag.Duration("once", 0, "print one sample taken over this interval and exit")
+	focusPid := flag.Int("focus", 0, "raise the terminal of this session process (what a click does) and exit")
 	height := flag.Int("height", 22, "segment height in pixels (the panel is usually 32)")
 	flag.Parse()
 
@@ -64,6 +84,16 @@ func main() {
 
 	b := &bar{dir: *dir, layout: *layout, smp: newSampler(), proc: procInfo(),
 		height: *height, files: map[string]string{}, prevFiles: map[string]string{}, drawn: map[string]string{}}
+	if *focusPid > 0 {
+		conn, err := dbus.ConnectSessionBus()
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := focusSession(conn, *focusPid); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if *once > 0 {
 		b.smp.Sample(time.Now())
 		time.Sleep(*once)
@@ -92,10 +122,13 @@ type bar struct {
 	smp         *sampler
 	proc        Proc
 
-	stats  Stats
-	gpuOK  bool
-	sess   segment // session names, coloured by state
-	names  []string
+	stats Stats
+	gpuOK bool
+
+	mu       sync.Mutex   // guards sessions: clicks read it from D-Bus goroutines
+	sessions []sessionBox // live sessions in bar order
+
+	conn   *dbus.Conn
 	items  map[string]*trayItem
 	itemsL []*trayItem
 
@@ -107,27 +140,79 @@ type bar struct {
 }
 
 func (b *bar) loadLights() {
-	b.sess, b.names = sessionView(LoadLights(b.dir), b.proc, time.Now())
+	boxes := sessionView(LoadLights(b.dir), b.proc, time.Now())
+	b.mu.Lock()
+	b.sessions = boxes
+	b.mu.Unlock()
 }
 
-// segments is what to draw, per item key, in bar order.
-func (b *bar) segments() ([]string, map[string]segment) {
+// maxSessionSlots is how many sessions get their own clickable item. Past
+// that, the last slot reads "+N".
+const maxSessionSlots = 6
+
+func slotKey(i int) string { return fmt.Sprintf("s%d", i) }
+
+// itemKeys is every item in bar order: session slots, then the stats.
+func itemKeys() []string {
+	var keys []string
+	for i := 0; i < maxSessionSlots; i++ {
+		keys = append(keys, slotKey(i))
+	}
+	return append(keys, segCPU, segGPU, segMem, segNet)
+}
+
+// segments is what to draw and its hover text, per item key, in bar order.
+// An item with no entry is hidden.
+func (b *bar) segments() ([]string, map[string]segment, map[string]string) {
 	segs := statSegments(b.stats, b.gpuOK || b.stats.GPU >= 0 || len(b.smp.drmFds) > 0)
-	if len(b.sess.Runs) > 0 {
-		segs[segSessions] = b.sess
+	titles := map[string]string{segCPU: "CPU", segGPU: "GPU", segMem: "Memory used / total (GiB)", segNet: "Network down / up per second"}
+	b.mu.Lock()
+	sessions := b.sessions
+	b.mu.Unlock()
+	for i, s := range sessions {
+		if i == maxSessionSlots-1 && len(sessions) > maxSessionSlots {
+			k := slotKey(i)
+			segs[k] = segment{Runs: []run{{Text: fmt.Sprintf("+%d", len(sessions)-i), Col: colLabel}}}
+			var rest []string
+			for _, r := range sessions[i:] {
+				rest = append(rest, r.Line)
+			}
+			titles[k] = sessionsTitle(rest)
+			break
+		}
+		segs[slotKey(i)] = segment{Runs: []run{{Text: s.Short, Col: s.Col}}}
+		titles[slotKey(i)] = s.Line
 	}
 	var keys []string
-	for _, k := range segOrder {
+	for _, k := range itemKeys() {
 		if _, ok := segs[k]; ok {
 			keys = append(keys, k)
 		}
 	}
-	return keys, segs
+	return keys, segs, titles
+}
+
+// focus raises the terminal of the session in slot i. Inside kitty it first
+// switches to the session's tab and window; the shell extension then raises
+// the OS window, since Wayland lets no app raise another app's window.
+func (b *bar) focus(i int) {
+	b.mu.Lock()
+	var pid int
+	if i < len(b.sessions) && !(i == maxSessionSlots-1 && len(b.sessions) > maxSessionSlots) {
+		pid = b.sessions[i].PID
+	}
+	b.mu.Unlock()
+	if pid == 0 {
+		return
+	}
+	if err := focusSession(b.conn, pid); err != nil {
+		log.Printf("focus pid %d: %v", pid, err)
+	}
 }
 
 // composite draws every segment side by side into one bitmap.
 func (b *bar) composite(h int) *image.NRGBA {
-	keys, segs := b.segments()
+	keys, segs, _ := b.segments()
 	gap := int(float64(h) * segGapPx)
 	var imgs []*image.NRGBA
 	w := 0
@@ -191,13 +276,19 @@ func (b *bar) run() error {
 		}
 	}
 
+	b.conn = conn
 	b.items = map[string]*trayItem{}
 	keys := []string{"bar"}
 	if b.layout == "split" {
-		keys = segOrder
+		keys = itemKeys()
 	}
 	for i, k := range keys {
-		it, err := newTrayItem(conn, itemPath(k), "sessionlights-"+k, uint32(i))
+		var onClick func()
+		if i < maxSessionSlots && b.layout == "split" {
+			slot := i
+			onClick = func() { b.focus(slot) }
+		}
+		it, err := newTrayItem(conn, itemPath(k), "sessionlights-"+k, uint32(i), onClick)
 		if err != nil {
 			return err
 		}
@@ -275,16 +366,15 @@ func (b *bar) registerOrder() []*trayItem {
 // because the host caches icons by name. The previous file is kept one round
 // so the host never loads a file that was just deleted.
 func (b *bar) draw() {
-	// The hover text names the sessions only. Putting the live numbers in it
-	// made every item send a title change each tick, and the host fetches
-	// three properties back for each: most of the bar's idle cost.
-	title := sessionsTitle(b.names)
+	// Hover text never carries the live numbers: that made every item send a
+	// title change each tick, and the host fetches three properties back for
+	// each, which was most of the bar's idle cost.
+	_, segs, titles := b.segments()
 	if b.layout != "split" {
-		b.publish("bar", b.items["bar"], b.composite(b.height), title)
+		b.publish("bar", b.items["bar"], b.composite(b.height), "SessionLights")
 		return
 	}
-	_, segs := b.segments()
-	for _, k := range segOrder {
+	for _, k := range itemKeys() {
 		it := b.items[k]
 		s, ok := segs[k]
 		if !ok {
@@ -294,10 +384,10 @@ func (b *bar) draw() {
 		it.SetActive(true) // first: a hidden item's host ignores its icon changes
 		if sk := s.key(); sk != b.drawn[k] {
 			minW := hostSafeWidth(max(measure(s, b.height), measure(widthTemplates[k], b.height)), b.height)
-			b.publish(k, it, renderSegment(s, b.height, minW), title)
+			b.publish(k, it, renderSegment(s, b.height, minW), titles[k])
 			b.drawn[k] = sk
 		}
-		it.SetTitle(title)
+		it.SetTitle(titles[k])
 	}
 }
 

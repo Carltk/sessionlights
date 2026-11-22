@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -135,5 +136,41 @@ func TestSamplerOnFakeProc(t *testing.T) {
 	}
 	if len(s.drmFds) != 1 {
 		t.Fatalf("drm fds %v, want only fd 7", s.drmFds)
+	}
+}
+
+func TestKittyTarget(t *testing.T) {
+	socks := []string{"@other-12", "@kitty-459237", "/run/user/1000/bus"}
+	cases := []struct {
+		env  map[string]string
+		addr string
+		id   int
+		ok   bool
+	}{
+		{map[string]string{"KITTY_LISTEN_ON": "unix:@kitty-459237", "KITTY_WINDOW_ID": "3"}, "@kitty-459237", 3, true},
+		{map[string]string{"KITTY_PID": "459237", "KITTY_WINDOW_ID": "1"}, "@kitty-459237", 1, true},
+		{map[string]string{"KITTY_PID": "999", "KITTY_WINDOW_ID": "1"}, "", 0, false}, // kitty without listen_on
+		{map[string]string{"KITTY_LISTEN_ON": "tcp:localhost:1234", "KITTY_WINDOW_ID": "3"}, "", 0, false},
+		{map[string]string{"KITTY_LISTEN_ON": "unix:@kitty-1", "KITTY_WINDOW_ID": "x"}, "", 0, false},
+		{nil, "", 0, false},
+	}
+	for _, c := range cases {
+		addr, id, ok := kittyTarget(c.env, socks)
+		if addr != c.addr || id != c.id || ok != c.ok {
+			t.Errorf("%v: got %q %d %v", c.env, addr, id, ok)
+		}
+	}
+}
+
+func TestKittyCommandFraming(t *testing.T) {
+	b, err := kittyCommand("focus-window", map[string]any{"match": "id:3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.HasPrefix(s, "\x1bP@kitty-cmd{") || !strings.HasSuffix(s, "}\x1b\\") ||
+		!strings.Contains(s, `"cmd":"focus-window"`) || !strings.Contains(s, `"match":"id:3"`) ||
+		!strings.Contains(s, `"no_response":true`) {
+		t.Fatalf("framing %q", s)
 	}
 }

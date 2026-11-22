@@ -43,11 +43,16 @@ type trayItem struct {
 	status   string
 }
 
-// sniMethods are the calls a host makes on a click or scroll. The bar has no
-// actions yet, so they are accepted and ignored.
-type sniMethods struct{}
+// sniMethods are the calls a host makes on a click or scroll. A left click
+// runs onActivate, off the D-Bus goroutine; everything else is ignored.
+type sniMethods struct{ onActivate func() }
 
-func (sniMethods) Activate(x, y int32) *dbus.Error          { return nil }
+func (m sniMethods) Activate(x, y int32) *dbus.Error {
+	if m.onActivate != nil {
+		go m.onActivate()
+	}
+	return nil
+}
 func (sniMethods) SecondaryActivate(x, y int32) *dbus.Error { return nil }
 func (sniMethods) ContextMenu(x, y int32) *dbus.Error       { return nil }
 func (sniMethods) Scroll(d int32, o string) *dbus.Error     { return nil }
@@ -87,9 +92,9 @@ const sniIntrospect = `<interface name="org.kde.StatusNotifierItem">
 
 // newTrayItem exports an item at path. order is the AppIndicator ordering
 // hint, so the segments keep their order across restarts.
-func newTrayItem(conn *dbus.Conn, path dbus.ObjectPath, id string, order uint32) (*trayItem, error) {
+func newTrayItem(conn *dbus.Conn, path dbus.ObjectPath, id string, order uint32, onActivate func()) (*trayItem, error) {
 	t := &trayItem{conn: conn, path: path, status: "Active"}
-	if err := conn.Export(sniMethods{}, path, sniIface); err != nil {
+	if err := conn.Export(sniMethods{onActivate: onActivate}, path, sniIface); err != nil {
 		return nil, err
 	}
 	str := func(v string) *prop.Prop { return &prop.Prop{Value: v, Emit: prop.EmitFalse} }

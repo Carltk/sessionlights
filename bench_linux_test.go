@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"image/color"
 	"testing"
 	"time"
 )
@@ -21,7 +20,7 @@ func BenchmarkSample(b *testing.B) {
 func BenchmarkRenderTick(b *testing.B) {
 	st := Stats{CPU: 23, GPU: 4, MemUsed: 9 << 30, MemTotal: 16 << 30, RxBps: 12e3, TxBps: 4e3}
 	segs := statSegments(st, true)
-	segs[segSessions] = segment{Dots: []color.NRGBA{colBusy, colIdle}}
+	segs["s0"] = segment{Runs: []run{{Text: "ULBar", Col: colBusy}}}
 	for i := 0; i < b.N; i++ {
 		for k, s := range segs {
 			img := renderSegment(s, 22, measure(widthTemplates[k], 22))
