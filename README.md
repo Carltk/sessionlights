@@ -38,7 +38,7 @@ sessionlights -png bar.png   # render the bar once to a PNG
 sessionlights uninstall      # remove the extension and autostart
 ```
 
-Each live session gets its own item: a short name in its state colour. **Click it to jump to that session's terminal.** Wayland lets no ordinary app raise another app's window, so `install` adds a ~70-line GNOME Shell extension (`gnome-extension/`) whose only job is raising the window that owns a process. In kitty a click also picks the session's tab, provided kitty has a remote-control socket: add `listen_on unix:@kitty` to `kitty.conf` and restart kitty.
+Each live session gets its own item: a short name in its state colour. **Double-click it to jump to that session's terminal** (Ubuntu's AppIndicator host only sends a click to the app on a double-click). Wayland lets no ordinary app raise another app's window, so `install` adds a ~70-line GNOME Shell extension (`gnome-extension/`) whose only job is raising the window that owns a process. In kitty a double-click also picks the session's tab, provided kitty has a remote-control socket: add `listen_on unix:@kitty` to `kitty.conf` and restart kitty.
 
 | Stat | Source | Colour |
 |---|---|---|
