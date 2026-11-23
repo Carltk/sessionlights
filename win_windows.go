@@ -30,6 +30,8 @@ var (
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
 	pSetWindowPos        = user32.NewProc("SetWindowPos")
+	pGetWindowLongW      = user32.NewProc("GetWindowLongW")
+	pSetWindowLongW      = user32.NewProc("SetWindowLongW")
 	pGetWindowRect       = user32.NewProc("GetWindowRect")
 	pMonitorFromWindow   = user32.NewProc("MonitorFromWindow")
 	pGetMonitorInfoW     = user32.NewProc("GetMonitorInfoW")
@@ -365,6 +367,25 @@ func monitorTop(hwnd uintptr) (int, bool) {
 
 func moveWindow(hwnd uintptr, x, y int) {
 	pSetWindowPos.Call(hwnd, 0, uintptr(x), uintptr(y), 0, 0, swpNoSize|swpNoZOrder|swpNoActivate)
+}
+
+// resizeWindow sets the window to w × h pixels as a popup. Gio makes every
+// window overlapped, and Windows will not let an overlapped window be
+// shorter than SM_CYMIN (47 px at 125%), however small WM_GETMINMAXINFO
+// says it may be; a popup has no such floor. app.Size is not used for this:
+// it re-applies the overlapped style each time. Window thread only.
+func resizeWindow(hwnd uintptr, w, h int) {
+	const (
+		gwlStyle        = ^uintptr(15) // (int)-16
+		wsPopup         = 0x80000000
+		wsOverlappedWin = 0x00CF0000
+		swpFrameChanged = 0x0020
+	)
+	st, _, _ := pGetWindowLongW.Call(hwnd, gwlStyle)
+	if want := (uint32(st) &^ wsOverlappedWin) | wsPopup; want != uint32(st) {
+		pSetWindowLongW.Call(hwnd, gwlStyle, uintptr(want))
+	}
+	pSetWindowPos.Call(hwnd, 0, 0, 0, uintptr(w), uintptr(h), swpNoMove|swpNoZOrder|swpNoActivate|swpFrameChanged)
 }
 
 // activate brings a terminal window to the front. Windows switches to that

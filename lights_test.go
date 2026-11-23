@@ -41,16 +41,62 @@ func TestDotColour(t *testing.T) {
 		{"waiting", "", "waiting"},
 		{"failed", "", "failed"},
 		{"busy", now.Add(-10 * time.Second).Format(time.RFC3339), "busy"},
-		{"busy", now.Add(-301 * time.Second).Format(time.RFC3339), "warn"},
+		{"busy", now.Add(-301 * time.Second).Format(time.RFC3339), "busy"}, // no long-busy warning any more
 		{"busy", "not a time", "busy"},
 		{"whatever", "", "dim"},
 	}
-	names := map[string]any{"idle": colIdle, "waiting": colWaiting, "failed": colFailed, "busy": colBusy, "warn": colWarn, "dim": colDim}
+	names := map[string]any{"idle": colIdle, "waiting": colWaiting, "failed": colFailed, "busy": colBusy, "dim": colDim}
 	for _, c := range cases {
 		got := dotColour(Light{State: c.state, Since: c.since}, now)
 		if got != names[c.want] {
 			t.Errorf("%s since %q: got %v, want %s", c.state, c.since, got, c.want)
 		}
+	}
+}
+
+func TestTipText(t *testing.T) {
+	cases := []struct {
+		l    Light
+		want string
+	}{
+		{Light{Name: "Research", State: "busy", Agents: 3}, "Research: busy · 3 sub-agents"},
+		{Light{Name: "Research", State: "busy", Agents: 1}, "Research: busy · 1 sub-agent"},
+		{Light{Name: "Sync", State: "failed", Detail: "API error"}, "Sync: failed, needs attention · API error"},
+		{Light{Name: "X", State: "odd"}, "X: unknown"},
+	}
+	for _, c := range cases {
+		if got := tipText(c.l); got != c.want {
+			t.Errorf("tipText(%+v) = %q, want %q", c.l, got, c.want)
+		}
+	}
+}
+
+// TestLoadLightsCountsAgents: one marker file per running sub-agent, in a
+// directory beside the light, is the count.
+func TestLoadLightsCountsAgents(t *testing.T) {
+	dir := t.TempDir()
+	light := filepath.Join(dir, "s1.json")
+	if err := os.WriteFile(light, []byte(`{"sessionId":"s1","name":"One","state":"busy"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "s2.json"), []byte(`{"sessionId":"s2","state":"idle"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ad := AgentsDir(light)
+	if err := os.MkdirAll(ad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a1", "a2"} {
+		if err := os.WriteFile(filepath.Join(ad, id), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := map[string]int{}
+	for _, l := range LoadLights(dir) {
+		got[l.SessionID] = l.Agents
+	}
+	if len(got) != 2 || got["s1"] != 2 || got["s2"] != 0 {
+		t.Errorf("agents = %v, want s1:2 s2:0 and the .agents dir not read as a light", got)
 	}
 }
 
@@ -102,14 +148,14 @@ func TestBuildViewSortTruncateRing(t *testing.T) {
 	if a.Name != "Alpha" || z.Key != "b" {
 		t.Errorf("not sorted by name: %q, %q", a.Name, z.Name)
 	}
-	if z.Name != "Zeta session with a ..." || len([]rune(z.Name)) != 23 {
+	if z.Name != "Zeta" {
 		t.Errorf("name truncation: %q", z.Name)
 	}
-	if a.Sub != "Claude needs your permis..." || len([]rune(a.Sub)) != 27 {
-		t.Errorf("detail truncation: %q", a.Sub)
+	if a.Tip != "Alpha: waiting for you · Claude needs your permission to use Bash" {
+		t.Errorf("tip with detail: %q", a.Tip)
 	}
-	if z.Sub != "idle" {
-		t.Errorf("sub falls back to state: %q", z.Sub)
+	if z.Tip != "Zeta session with a very long name: idle" {
+		t.Errorf("tip keeps the full name: %q", z.Tip)
 	}
 	if !z.OnHere || a.OnHere {
 		t.Errorf("ring: zeta %v alpha %v", z.OnHere, a.OnHere)

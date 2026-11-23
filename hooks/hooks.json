@@ -56,6 +56,48 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "args": [
+              "hook"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "args": [
+              "hook"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "args": [
+              "hook"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "StopFailure": [
       {
         "hooks": [

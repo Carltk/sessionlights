@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/f32"
 	"gioui.org/font"
 	"gioui.org/font/gofont"
 	"gioui.org/io/event"
@@ -32,6 +33,14 @@ var (
 	colGrip   = rgb(0x5A5F6A)
 	colDrag   = color.NRGBA{0xFF, 0xFF, 0xFF, 0x30}
 	colBadge  = color.NRGBA{0x3B, 0x82, 0xF6, 0xFF}
+)
+
+// Strip geometry, in dp. One line of 12sp text plus the box's 2dp padding
+// is about rowH; the strip adds stripPadY above and below.
+const (
+	rowH      = 20
+	stripPadY = 3
+	clockSp   = 20
 )
 
 type ui struct {
@@ -93,14 +102,23 @@ func (u *ui) fit(gtx layout.Context, size image.Point) {
 	if size == u.want {
 		return
 	}
+	u.s.mu.Lock()
+	hwnd := u.s.hwnd
+	u.s.mu.Unlock()
+	if hwnd == 0 {
+		// Not attached yet: let Gio size it, overlapped floor and all, and
+		// leave want unset so the first frame after attach resizes it natively.
+		px := gtx.Metric.PxPerDp
+		go u.s.w.Option(app.Size(unit.Dp(float32(size.X)/px), unit.Dp(float32(size.Y)/px)))
+		return
+	}
 	u.want = size
-	px := gtx.Metric.PxPerDp
-	go u.s.w.Option(app.Size(unit.Dp(float32(size.X)/px), unit.Dp(float32(size.Y)/px)))
+	go u.s.w.Run(func() { resizeWindow(hwnd, size.X, size.Y) })
 }
 
 func (u *ui) strip(gtx layout.Context, v View) layout.Dimensions {
-	origin := image.Pt(gtx.Dp(6), gtx.Dp(5))
-	return layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5), Left: unit.Dp(6), Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	origin := image.Pt(gtx.Dp(6), gtx.Dp(stripPadY))
+	return layout.Inset{Top: unit.Dp(stripPadY), Bottom: unit.Dp(stripPadY), Left: unit.Dp(6), Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return u.row(gtx, v, origin)
 	})
 }
@@ -122,8 +140,10 @@ func (u *ui) row(gtx layout.Context, v View, origin image.Point) layout.Dimensio
 	}
 
 	add("", 0, u.grip)
+	clock := time.Now().Format("15:04")
+	add("", 6, func(gtx layout.Context) layout.Dimensions { return u.clock(gtx, clock) })
 	if v.Here > 0 {
-		add("", 4, func(gtx layout.Context) layout.Dimensions { return u.here(gtx, v) })
+		add("", 12, func(gtx layout.Context) layout.Dimensions { return u.here(gtx, v) })
 	}
 	if len(v.Boxes) == 0 {
 		add("", 8, u.empty)
@@ -146,8 +166,15 @@ func (u *ui) row(gtx layout.Context, v View, origin image.Point) layout.Dimensio
 		b := b
 		add(b.Key, gap, func(gtx layout.Context) layout.Dimensions { return u.box(gtx, b) })
 	}
-	clock := time.Now().Format("15:04")
-	add("", 16, func(gtx layout.Context) layout.Dimensions { return u.clock(gtx, clock) })
+	if st := u.s.stats.Load(); st != nil {
+		for i, seg := range statOrder(*st, u.s.gpuOK.Load()) {
+			gap := unit.Dp(12)
+			if i == 0 {
+				gap = 22
+			}
+			add("", gap, func(gtx layout.Context) layout.Dimensions { return u.segment(gtx, seg) })
+		}
+	}
 
 	h := 0
 	for _, it := range items {
@@ -225,11 +252,12 @@ func (u *ui) here(gtx layout.Context, v View) layout.Dimensions {
 // swallow every click, because Gio's hit test walks past click handlers to
 // any move area underneath.
 func (u *ui) grip(gtx layout.Context) layout.Dimensions {
-	size := image.Pt(gtx.Dp(12), gtx.Dp(28))
+	size := image.Pt(gtx.Dp(12), gtx.Dp(rowH))
 	r := gtx.Dp(1.5)
+	top := (size.Y - 3*gtx.Dp(5)) / 2
 	for row := 0; row < 4; row++ {
 		for col := 0; col < 2; col++ {
-			c := image.Pt(gtx.Dp(3)+col*gtx.Dp(5), gtx.Dp(6)+row*gtx.Dp(5))
+			c := image.Pt(gtx.Dp(3)+col*gtx.Dp(5), top+row*gtx.Dp(5))
 			paint.FillShape(gtx.Ops, colGrip, clip.Ellipse{Min: c.Sub(image.Pt(r, r)), Max: c.Add(image.Pt(r, r))}.Op(gtx.Ops))
 		}
 	}
@@ -254,15 +282,21 @@ func (u *ui) empty(gtx layout.Context) layout.Dimensions {
 func (u *ui) box(gtx layout.Context, b Box) layout.Dimensions {
 	// Record the content first: the ring and hit area need its size.
 	m := op.Record(gtx.Ops)
-	dims := layout.Inset{Left: unit.Dp(7), Right: unit.Dp(9), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	// One line: the dot carries the state, so the status text is gone.
+	dims := layout.Inset{Left: unit.Dp(7), Right: unit.Dp(8), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return dot(gtx, b.Dot) }),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return u.label(gtx, b.Name, 12, colName, true)
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if b.Agents == 0 {
+					return layout.Dimensions{}
+				}
 				return layout.Inset{Left: unit.Dp(7)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions { return u.label(gtx, b.Name, 12, colName, true) }),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions { return u.label(gtx, b.Sub, 10, b.Dot, false) }),
-					)
+					return u.agents(gtx, b.Agents)
 				})
 			}),
 		)
@@ -318,7 +352,7 @@ func (u *ui) handle(gtx layout.Context, v View) {
 	}
 	for _, b := range v.Boxes {
 		for {
-			ev, ok := gtx.Event(pointer.Filter{Target: u.tag(b.Key), Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel})
+			ev, ok := gtx.Event(pointer.Filter{Target: u.tag(b.Key), Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel | pointer.Enter | pointer.Leave | pointer.Move})
 			if !ok {
 				break
 			}
@@ -328,7 +362,18 @@ func (u *ui) handle(gtx layout.Context, v View) {
 			}
 			x := float32(u.slots[b.Key].Min.X) + e.Position.X
 			switch e.Kind {
+			case pointer.Enter, pointer.Move:
+				// Move too, not just Enter: Gio sends no Leave when the
+				// pointer exits the window, so coming back onto the same box
+				// brings no new Enter.
+				if !u.drag.active && u.s.tipKey() != b.Key {
+					key, tip, slotX := b.Key, b.Tip, u.slots[b.Key].Min.X
+					go u.s.hover(key, tip, slotX)
+				}
+			case pointer.Leave:
+				go u.s.unhover(b.Key)
 			case pointer.Press:
+				go u.s.unhover("")
 				if e.Buttons.Contain(pointer.ButtonSecondary) {
 					go u.s.close()
 					continue
@@ -402,7 +447,7 @@ const (
 // centres the digits, not the line box: digits have no descenders, so
 // centring the box would leave them sitting high.
 func (u *ui) clock(gtx layout.Context, s string) layout.Dimensions {
-	l := material.Label(u.th, unit.Sp(29), s)
+	l := material.Label(u.th, unit.Sp(clockSp), s)
 	l.Color = colName
 	l.MaxLines = 1
 	l.Font.Typeface = clockFace + ",Segoe UI"
@@ -410,12 +455,104 @@ func (u *ui) clock(gtx layout.Context, s string) layout.Dimensions {
 	m := op.Record(gtx.Ops)
 	dims := l.Layout(gtx)
 	call := m.Stop()
-	digitTop := dims.Size.Y - dims.Baseline - gtx.Sp(29)*7/10 // Segoe's digits stand ~0.7em
+	digitTop := dims.Size.Y - dims.Baseline - gtx.Sp(clockSp)*7/10 // Segoe's digits stand ~0.7em
 	mid := (digitTop + dims.Size.Y - dims.Baseline) / 2
 	off := op.Offset(image.Pt(0, -mid)).Push(gtx.Ops)
 	call.Add(gtx.Ops)
 	off.Pop()
 	return layout.Dimensions{Size: image.Pt(dims.Size.X, 0)}
+}
+
+// statOrder is the stat segments in strip order. The GPU one is missing
+// when the GPU cannot be read.
+func statOrder(s Stats, gpuOK bool) []segment {
+	m := statSegments(s, gpuOK)
+	var out []segment
+	for _, k := range []string{segCPU, segGPU, segMem, segNet} {
+		if seg, ok := m[k]; ok {
+			out = append(out, seg)
+		}
+	}
+	return out
+}
+
+// statSlot is the widest text each value run can show, so a segment keeps
+// one width and the strip does not twitch as the numbers change.
+func statSlot(label string) string {
+	switch label {
+	case "C-", "G-":
+		return "100%"
+	case "M-":
+		return "88.8/88"
+	}
+	return "888K" // network rates: "840K", "1.2M", "12M", "1.1G"
+}
+
+// segment draws one stat: label runs in their colour, value runs in a
+// fixed-width slot, arrows as small triangles.
+func (u *ui) segment(gtx layout.Context, seg segment) layout.Dimensions {
+	var kids []layout.FlexChild
+	label := ""
+	for _, r := range seg.Runs {
+		r := r
+		switch {
+		case r.Arrow != 0:
+			label = "net"
+			kids = append(kids, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return arrow(gtx, r.Arrow > 0, r.Col) }))
+		case r.Col == colLabel:
+			if r.Text != " " {
+				label = r.Text
+			}
+			kids = append(kids, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return u.label(gtx, r.Text, 12, r.Col, false) }))
+		default:
+			slot := statSlot(label)
+			kids = append(kids, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				m := op.Record(gtx.Ops)
+				w := u.label(gtx, slot, 12, r.Col, true).Size.X
+				m.Stop()
+				gtx.Constraints.Min.X = w
+				return u.label(gtx, r.Text, 12, r.Col, true)
+			}))
+		}
+	}
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, kids...)
+}
+
+// arrow is a small filled triangle: Segoe UI's arrow glyphs sit too low.
+func arrow(gtx layout.Context, up bool, c color.NRGBA) layout.Dimensions {
+	w, h := gtx.Dp(8), gtx.Dp(7)
+	var p clip.Path
+	p.Begin(gtx.Ops)
+	if up {
+		p.MoveTo(f32pt(0, h))
+		p.LineTo(f32pt(w, h))
+		p.LineTo(f32pt(w/2, 0))
+	} else {
+		p.MoveTo(f32pt(0, 0))
+		p.LineTo(f32pt(w, 0))
+		p.LineTo(f32pt(w/2, h))
+	}
+	p.Close()
+	paint.FillShape(gtx.Ops, c, clip.Outline{Path: p.End()}.Op())
+	return layout.Dimensions{Size: image.Pt(w+gtx.Dp(2), h)}
+}
+
+func f32pt(x, y int) f32.Point { return f32.Pt(float32(x), float32(y)) }
+
+// agents is the sub-agent mark: a small busy-coloured dot and the count.
+func (u *ui) agents(gtx layout.Context, n int) layout.Dimensions {
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			d := gtx.Dp(7)
+			paint.FillShape(gtx.Ops, colBusy, clip.Ellipse{Max: image.Pt(d, d)}.Op(gtx.Ops))
+			return layout.Dimensions{Size: image.Pt(d, d)}
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return u.label(gtx, strconv.Itoa(n), 11, colBusy, true)
+			})
+		}),
+	)
 }
 
 func dot(gtx layout.Context, c color.NRGBA) layout.Dimensions {

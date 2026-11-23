@@ -265,3 +265,59 @@ func TestHookNoTempFilesLeft(t *testing.T) {
 		t.Fatalf("expected only the light, got %d files", len(entries))
 	}
 }
+
+// TestHookSubagentsAndPermissionClear: sub-agents are counted one marker per
+// agent id, and a tool running after a permission prompt turns red back to
+// busy, while PostToolUse on a busy light writes nothing.
+func TestHookSubagentsAndPermissionClear(t *testing.T) {
+	dir := t.TempDir()
+	p := fakeProbe{pid: 4242, start: 1000}
+	now := time.Date(2026, 11, 23, 13, 0, 0, 0, time.UTC)
+	ev := func(name string, extra map[string]string) {
+		t.Helper()
+		if err := handleHook(hookEvent(t, name, extra), dir, p, liveProc{}, now); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	count := func() int {
+		for _, l := range LoadLights(dir) {
+			if l.SessionID == sid {
+				return l.Agents
+			}
+		}
+		return -1
+	}
+
+	ev("UserPromptSubmit", nil)
+	ev("SubagentStart", map[string]string{"agent_id": "a1"})
+	ev("SubagentStart", map[string]string{"agent_id": "a2"})
+	ev("SubagentStart", map[string]string{"agent_id": "a2"}) // repeated start is still one agent
+	if n := count(); n != 2 {
+		t.Fatalf("agents after two starts = %d, want 2", n)
+	}
+	ev("SubagentStop", map[string]string{"agent_id": "a1"})
+	if n := count(); n != 1 {
+		t.Fatalf("agents after one stop = %d, want 1", n)
+	}
+
+	before, _ := os.ReadFile(filepath.Join(dir, sid+".json"))
+	ev("PostToolUse", nil)
+	after, _ := os.ReadFile(filepath.Join(dir, sid+".json"))
+	if string(before) != string(after) {
+		t.Error("PostToolUse rewrote a busy light")
+	}
+
+	ev("Notification", map[string]string{"notification_type": "permission_prompt", "message": "Claude needs your permission to use Bash"})
+	if r, _ := readRec(t, dir); r.State != "waiting" {
+		t.Fatalf("state = %q, want waiting", r.State)
+	}
+	ev("PostToolUse", nil)
+	if r, _ := readRec(t, dir); r.State != "busy" || r.Detail != "" {
+		t.Errorf("after the approved tool: state %q detail %q, want busy and no detail", r.State, r.Detail)
+	}
+
+	ev("SessionEnd", nil)
+	if _, err := os.Stat(AgentsDir(filepath.Join(dir, sid+".json"))); !os.IsNotExist(err) {
+		t.Errorf("agents dir survives SessionEnd: %v", err)
+	}
+}

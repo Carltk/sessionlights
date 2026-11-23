@@ -5,10 +5,12 @@ A tiny always-on-top strip for Windows that shows what each of your [Claude Code
 | Dot | Meaning |
 |---|---|
 | amber | busy: a turn is running |
-| orange | busy for more than 5 minutes |
 | green | idle: finished, nothing wanted |
-| red | waiting on you (permission prompt or question) |
-| deep red | the turn failed on an API error |
+| red | waiting on you (permission prompt or question); back to amber once the approved tool has run |
+| deep red | the turn failed on an API error: needs attention |
+| small amber dot + number | that many sub-agents running |
+
+Hover a box for its full name, its state in words and the detail (the permission it wants, the error).
 
 It is written in Go with [Gio](https://gioui.org), builds without a C compiler, and redraws only when something changes. At idle it uses about 56 MB of RAM and no measurable CPU.
 
@@ -117,13 +119,15 @@ Hook and strip both use `~/.claude/session-lights/` (inside `CLAUDE_CONFIG_DIR` 
 | Field | Required | Meaning |
 |---|---|---|
 | `sessionId` | yes | stable id; one file per session |
-| `name` | yes | shown in bold, cut to 23 characters |
+| `name` | yes | shown in bold, cut to about 10 characters at a word end; in full on hover |
 | `state` | yes | `busy`, `idle`, `waiting` or `failed`; anything else shows a grey dot |
-| `since` | for `busy` | RFC 3339 time the state began; turns amber to orange after 5 minutes |
-| `detail` | no | second line, cut to 27 characters; falls back to the state |
+| `since` | no | RFC 3339 time the state began |
+| `detail` | no | shown on hover, cut to 80 characters |
 | `window.hwnd` | no | the terminal's top-level window handle; enables click-to-focus and the ring |
 | `pid` | no | the `claude.exe` process; its death hides the box |
 | `pidStart` | no | that process's start time in unix ms, so a reused PID is not mistaken for the session |
+
+Running sub-agents are not a field: the hook keeps one empty file per agent id in `<session>.agents/` beside the light (SubagentStart adds it, SubagentStop removes it) and the strip counts them, so agents started in parallel cannot lose a count.
 
 A file without a `pid` is hidden once it hasn't been modified for 30 minutes. Files are re-read as soon as they change, and a half-written file is skipped until the next write.
 

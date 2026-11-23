@@ -30,6 +30,7 @@ type hookInput struct {
 	Message          string `json:"message"`
 	NotificationType string `json:"notification_type"`
 	Error            string `json:"error"`
+	AgentID          string `json:"agent_id"`
 }
 
 // record is a light file as the hook writes it: the documented format plus two
@@ -148,7 +149,18 @@ func handleHook(raw []byte, dir string, probe sessionProbe, proc Proc, now time.
 	}
 	var c change
 	switch in.Event {
+	case "SubagentStart", "SubagentStop":
+		return markAgent(path, in.AgentID, in.Event == "SubagentStart", now)
+	case "PostToolUse":
+		// Fires after every tool, so it only writes when it has something to
+		// say: a tool ran, so a waiting light's permission was granted.
+		var prev record
+		if b, err := os.ReadFile(path); err != nil || json.Unmarshal(b, &prev) != nil || prev.State != "waiting" {
+			return nil
+		}
+		c = change{state: "busy", failures: "keep"}
 	case "SessionStart":
+		_ = os.RemoveAll(AgentsDir(path)) // a resumed session starts with none
 		c = change{state: "idle", failures: "reset", capture: true}
 	case "UserPromptSubmit":
 		c = change{state: "busy", failures: "reset", capture: true}
@@ -168,6 +180,7 @@ func handleHook(raw []byte, dir string, probe sessionProbe, proc Proc, now time.
 	case "PostToolUseFailure":
 		c = change{state: "busy", failures: "bump"}
 	case "SessionEnd":
+		_ = os.RemoveAll(AgentsDir(path))
 		retry(func() error {
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return err
@@ -246,6 +259,31 @@ func handleHook(raw []byte, dir string, probe sessionProbe, proc Proc, now time.
 		return err
 	}
 	sweep(dir, proc, now, path)
+	return nil
+}
+
+// markAgent adds or removes one sub-agent's marker beside the light, then
+// touches the light so the strip, which watches only the top folder, looks
+// again. One file per agent id, so parallel starts cannot lose a count.
+func markAgent(lightPath, agentID string, start bool, now time.Time) error {
+	id := safeIDRe.ReplaceAllString(agentID, "")
+	if id == "" {
+		return nil
+	}
+	dir := AgentsDir(lightPath)
+	marker := filepath.Join(dir, id)
+	if start {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(marker, nil, 0o644); err != nil {
+			return err
+		}
+	} else {
+		_ = os.Remove(marker)
+		_ = os.Remove(dir) // only succeeds once it is empty
+	}
+	_ = os.Chtimes(lightPath, now, now)
 	return nil
 }
 
@@ -365,6 +403,7 @@ func sweep(dir string, proc Proc, now time.Time, own string) {
 		l.modTime = info.ModTime()
 		if !Alive(l, proc, now) {
 			_ = os.Remove(full)
+			_ = os.RemoveAll(AgentsDir(full))
 		}
 	}
 }

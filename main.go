@@ -21,10 +21,12 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,7 +58,18 @@ func main() {
 	dir := flag.String("dir", lightsDir(), "light files directory")
 	logFile := flag.String("log", "", "write a debug log (frame count, events) to this file")
 	vd := flag.String("vd", "", "MScholtes VirtualDesktop.exe for this Windows build: pin one strip to every desktop")
+	once := flag.Duration("once", 0, "print one stats sample taken over this interval and exit")
 	flag.Parse()
+
+	if *once > 0 { // same line as the Linux bar's -once
+		smp := newSampler()
+		smp.Sample(time.Now())
+		time.Sleep(*once)
+		st := smp.Sample(time.Now())
+		fmt.Printf("cpu=%.1f gpu=%.1f mem_used=%d mem_total=%d rx_bps=%.0f tx_bps=%.0f\n",
+			st.CPU, st.GPU, st.MemUsed, st.MemTotal, st.RxBps, st.TxBps)
+		return
+	}
 
 	log.SetOutput(os.Stderr)
 	if *logFile != "" {
@@ -87,7 +100,7 @@ func main() {
 	go func() {
 		w := new(app.Window)
 		// Not app.TopMost: see setTopmost.
-		w.Option(app.Title(stripTitle), app.Decorated(false), app.Size(unit.Dp(160), unit.Dp(40)))
+		w.Option(app.Title(stripTitle), app.Decorated(false), app.Size(unit.Dp(160), unit.Dp(32)))
 		s.w = w
 		if err := s.run(); err != nil {
 			log.Fatal(err)
@@ -106,6 +119,11 @@ type strip struct {
 
 	view   atomic.Pointer[View]
 	frames atomic.Int64
+	stats  atomic.Pointer[Stats]
+	gpuOK  atomic.Bool // the GPU has been read at least once
+	tip    tooltip     // hover text; touched on the window thread only
+	tipMu  sync.Mutex
+	tipFor string // the box the hover text is for, "" when hidden
 
 	mu      sync.Mutex
 	hwnd    uintptr
@@ -160,6 +178,7 @@ func (s *strip) attach(hwnd uintptr) {
 	go s.tick()
 	go s.follow()
 	go s.clock()
+	go s.sample()
 	if s.vd != "" {
 		go onDesktopSwitch(func() { s.arrive(currentDesktop()) })
 	}
@@ -303,7 +322,102 @@ func (s *strip) clock() {
 	}
 }
 
+// statTick is how often the stats are sampled, as on the Linux bar.
+const statTick = 2 * time.Second
+
+// sample reads the stats every statTick and redraws only when what the
+// strip shows changed, so an idle machine with steady numbers stays still.
+func (s *strip) sample() {
+	smp := newSampler()
+	smp.Sample(time.Now())
+	shown := ""
+	for range time.Tick(statTick) {
+		st := smp.Sample(time.Now())
+		if st.GPU >= 0 {
+			s.gpuOK.Store(true)
+		}
+		var key strings.Builder
+		for _, seg := range statOrder(st, s.gpuOK.Load()) {
+			key.WriteString(seg.key())
+		}
+		if k := key.String(); k != shown {
+			shown = k
+			s.stats.Store(&st)
+			s.w.Invalidate()
+		}
+	}
+}
+
 // ---- actions from the UI (called off the event goroutine) --------------------
+
+// tipKey is the box whose hover text is showing, "" for none.
+func (s *strip) tipKey() string {
+	s.tipMu.Lock()
+	defer s.tipMu.Unlock()
+	return s.tipFor
+}
+
+// hover shows box key's text just under the strip, left-aligned with the box
+// that starts slotX pixels into the window.
+func (s *strip) hover(key, text string, slotX int) {
+	s.mu.Lock()
+	hwnd := s.hwnd
+	s.mu.Unlock()
+	if hwnd == 0 || text == "" {
+		return
+	}
+	s.tipMu.Lock()
+	if s.tipFor == key {
+		s.tipMu.Unlock()
+		return
+	}
+	watching := s.tipFor != ""
+	s.tipFor = key
+	s.tipMu.Unlock()
+	// Measured on the window thread: Gio makes that thread DPI-aware, but
+	// not the process, so GetWindowRect from any other goroutine returns
+	// scaled-down coordinates at anything over 100%.
+	s.w.Run(func() {
+		if l, _, _, b, ok := windowRect(hwnd); ok {
+			s.tip.show(hwnd, l+slotX, b+2, text)
+		}
+	})
+	if !watching {
+		go s.watchTipLeave(hwnd)
+	}
+}
+
+// unhover hides the text if it belongs to key; "" hides whatever shows.
+func (s *strip) unhover(key string) {
+	s.tipMu.Lock()
+	if s.tipFor == "" || key != "" && s.tipFor != key {
+		s.tipMu.Unlock()
+		return
+	}
+	s.tipFor = ""
+	s.tipMu.Unlock()
+	s.w.Run(func() { s.tip.hide() })
+}
+
+// watchTipLeave hides the text once the cursor is off the strip. Gio on
+// Windows sends no Leave when the pointer exits the window (it handles no
+// WM_POINTERLEAVE), so without this a tip would stay up. It polls only
+// while a tip shows.
+func (s *strip) watchTipLeave(hwnd uintptr) {
+	for range time.Tick(150 * time.Millisecond) {
+		if s.tipKey() == "" {
+			return
+		}
+		// Both read on this goroutine, so both are in the same (possibly
+		// scaled) coordinates and compare correctly.
+		l, t, r, b, ok := windowRect(hwnd)
+		x, y, okc := cursorPos()
+		if !ok || !okc || x < l || x >= r || y < t || y >= b {
+			s.unhover("")
+			return
+		}
+	}
+}
 
 func (s *strip) focus(hwnd int64) {
 	// Switching first makes the jump reliable: SetForegroundWindow alone is

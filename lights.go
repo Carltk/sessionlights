@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,7 +28,19 @@ type Light struct {
 	// set by a session supervisor. With no Window, a click runs `ca` on it.
 	AttachID string `json:"attachId"`
 
+	// Agents is the number of sub-agents running, counted from the marker
+	// files in "<light name>.agents/" beside the light, one per agent id. A
+	// directory and not a field in the light: agents start in parallel, and
+	// a counter in one file would lose increments to the hooks' races.
+	Agents int `json:"-"`
+
 	modTime time.Time
+}
+
+// AgentsDir is where the hook keeps one marker file per running sub-agent
+// of the light at lightPath.
+func AgentsDir(lightPath string) string {
+	return strings.TrimSuffix(lightPath, ".json") + ".agents"
 }
 
 // Window is the terminal hosting a session.
@@ -43,10 +56,13 @@ var attachIDRe = regexp.MustCompile(`^[0-9a-f]{8}$`)
 // Box is what the strip draws for one session: everything already decided,
 // so the UI does no thinking and two equal views mean nothing to redraw.
 type Box struct {
-	Key    string
-	Name   string
-	Sub    string
-	Dot    color.NRGBA
+	Key  string
+	Name string
+	// Tip is the hover text: the full name, the state in words, the detail.
+	Tip string
+	Dot color.NRGBA
+	// Agents is how many sub-agents the session is running now.
+	Agents int
 	HWND   int64
 	OnHere bool
 	Desk   int // 1-based virtual desktop number; 0 when unknown
@@ -76,7 +92,6 @@ func (v View) Equal(o View) bool {
 // Deliberately not pure hues: on a dark strip the saturated versions vibrate.
 var (
 	colBusy    = rgb(0xE0A33E)
-	colWarn    = rgb(0xE8742C)
 	colIdle    = rgb(0x3FB950)
 	colWaiting = rgb(0xF04747)
 	colFailed  = rgb(0xD0304A)
@@ -88,11 +103,10 @@ func rgb(v uint32) color.NRGBA {
 }
 
 const (
-	warnAfter    = 300 * time.Second
 	staleNoPID   = 30 * time.Minute
 	pidStartSlop = 2000 // ms
 	maxName      = 23
-	maxSub       = 27
+	maxDetail    = 80
 )
 
 // Proc answers questions about live processes. Real on Windows, faked in tests.
@@ -151,6 +165,9 @@ func LoadLights(dir string) []Light {
 		if info, err := e.Info(); err == nil {
 			l.modTime = info.ModTime()
 		}
+		if agents, err := os.ReadDir(AgentsDir(path)); err == nil {
+			l.Agents = len(agents)
+		}
 		out = append(out, l)
 	}
 	return out
@@ -202,15 +219,12 @@ func BuildView(lights []Light, p Proc, d Desktops, desks DeskInfo, here string, 
 			continue
 		}
 		b := Box{
-			Key:  l.SessionID,
-			Name: truncate(l.Name, maxName),
-			Dot:  dotColour(l, now),
+			Key:    l.SessionID,
+			Name:   shortName(l.Name),
+			Tip:    tipText(l),
+			Dot:    dotColour(l, now),
+			Agents: l.Agents,
 		}
-		sub := l.Detail
-		if sub == "" {
-			sub = l.State
-		}
-		b.Sub = truncate(sub, maxSub)
 		if attachIDRe.MatchString(l.AttachID) {
 			b.Attach = l.AttachID
 		}
@@ -284,12 +298,38 @@ func dotColour(l Light, now time.Time) color.NRGBA {
 	case "failed":
 		return colFailed
 	case "busy":
-		if since, err := time.Parse(time.RFC3339, l.Since); err == nil && now.Sub(since) >= warnAfter {
-			return colWarn
-		}
 		return colBusy
 	}
 	return colDim
+}
+
+// stateWords is the state as the hover text says it.
+var stateWords = map[string]string{
+	"idle":    "idle",
+	"busy":    "busy",
+	"waiting": "waiting for you",
+	"failed":  "failed, needs attention",
+}
+
+// tipText is a box's hover text: "PAI Research: waiting for you · Claude
+// needs your permission to use Bash · 2 sub-agents".
+func tipText(l Light) string {
+	s := strings.TrimSpace(l.Name)
+	words := stateWords[l.State]
+	if words == "" {
+		words = "unknown"
+	}
+	s += ": " + words
+	if l.Detail != "" {
+		s += " · " + truncate(l.Detail, maxDetail)
+	}
+	switch {
+	case l.Agents == 1:
+		s += " · 1 sub-agent"
+	case l.Agents > 1:
+		s += " · " + strconv.Itoa(l.Agents) + " sub-agents"
+	}
+	return s
 }
 
 // truncate cuts on runes, keeping the whole thing within max runes.
