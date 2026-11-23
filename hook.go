@@ -31,6 +31,17 @@ type hookInput struct {
 	NotificationType string `json:"notification_type"`
 	Error            string `json:"error"`
 	AgentID          string `json:"agent_id"`
+	// BackgroundTasks is Stop's list of in-flight background work; nil when
+	// the Claude Code version does not send it.
+	BackgroundTasks *[]backgroundTask `json:"background_tasks"`
+}
+
+// backgroundTask is one entry of Stop's background_tasks. A sub-agent's task
+// id is its agent_id.
+type backgroundTask struct {
+	ID     string `json:"id"`
+	Type   string `json:"type"`
+	Status string `json:"status"`
 }
 
 // record is a light file as the hook writes it: the documented format plus two
@@ -170,6 +181,9 @@ func handleHook(raw []byte, dir string, probe sessionProbe, proc Proc, now time.
 	case "UserPromptSubmit":
 		c = change{state: "busy", failures: "reset", capture: true}
 	case "Stop":
+		if in.AgentID == "" && in.BackgroundTasks != nil {
+			pruneAgents(path, *in.BackgroundTasks)
+		}
 		c = change{state: "idle", failures: "keep"}
 	case "Notification":
 		if !isBlocking(in) {
@@ -292,6 +306,35 @@ func markAgent(lightPath, agentID string, start bool, now time.Time) error {
 	}
 	_ = os.Chtimes(lightPath, now, now)
 	return nil
+}
+
+// pruneAgents drops the markers of sub-agents that are no longer running
+// when the main thread's turn ends. Foreground sub-agents finish inside the
+// turn, so at Stop only background ones (listed in background_tasks) may
+// still run; any other marker is one whose SubagentStop never fired, e.g. an
+// agent interrupted with Esc. Kinds of background work that run sub-agents
+// not listed one by one (a workflow, a teammate, a remote agent) keep every
+// marker, because their agents' ids are not in the list.
+func pruneAgents(lightPath string, tasks []backgroundTask) {
+	live := map[string]bool{}
+	for _, t := range tasks {
+		switch t.Type {
+		case "local_agent":
+			live[safeIDRe.ReplaceAllString(t.ID, "")] = true
+		case "local_workflow", "in_process_teammate", "remote_agent":
+			return
+		}
+	}
+	dir := AgentsDir(lightPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !live[e.Name()] {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
 }
 
 // retry runs f up to 10 times, 15 ms apart, for Windows sharing violations
