@@ -181,8 +181,12 @@ func TestHookSweepsDeadLights(t *testing.T) {
 	dead, _ := json.Marshal(Light{SessionID: "dead", Name: "x", State: "idle", PID: 99, PIDStart: 900000})
 	os.WriteFile(filepath.Join(dir, "dead.json"), dead, 0o644)
 	os.WriteFile(filepath.Join(dir, "session-lights-order.json"), []byte(`["a","b"]`), 0o644)
-	os.MkdirAll(filepath.Join(dir, "dead.agents"), 0o755)
-	os.WriteFile(filepath.Join(dir, "dead.agents", "a1"), nil, 0o644)
+	if err := os.MkdirAll(filepath.Join(dir, "dead.agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dead.agents", "a1"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	handleHook(hookEvent(t, "SessionStart", nil), dir, fakeProbe{}, liveProc{}, time.Now()) // liveProc start 1000, far outside the 2 s slop
 	if _, err := os.Stat(filepath.Join(dir, "dead.json")); !os.IsNotExist(err) {
 		t.Fatal("light with a recycled pid survived the sweep")
@@ -331,53 +335,69 @@ func TestHookSubagentsAndPermissionClear(t *testing.T) {
 	}
 }
 
-// TestHookStopPrunesStaleAgents: at the main thread's Stop, markers for
-// agents not in background_tasks go (their SubagentStop never came); a
-// running workflow, or a Stop without the field, keeps them all.
+// TestHookStopPrunesStaleAgents: a main-thread Stop clears every sub-agent
+// marker only when nothing left in the background can be running agents.
+// Anything else (a background agent, whose own children are unlisted; a
+// workflow; a teammate; an unknown kind; a missing, null or malformed field;
+// a Stop carrying agent_id) keeps them, and a bad field never costs the
+// state change itself.
 func TestHookStopPrunesStaleAgents(t *testing.T) {
 	dir := t.TempDir()
 	p := fakeProbe{pid: 4242, start: 1000}
 	now := time.Now()
+	agents := filepath.Join(dir, sid+".agents")
 	raw := func(js string) {
 		t.Helper()
 		if err := handleHook([]byte(js), dir, p, liveProc{}, now); err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v", js, err)
 		}
 	}
-	count := func() int {
-		for _, l := range LoadLights(dir) {
-			if l.SessionID == sid {
-				return l.Agents
-			}
-		}
-		return -1
+	ev := func(event, extra string) {
+		t.Helper()
+		raw(`{"session_id":"` + sid + `","hook_event_name":"` + event + `"` + extra + `}`)
 	}
-	start := func(ids ...string) {
-		for _, id := range ids {
-			raw(`{"session_id":"` + sid + `","hook_event_name":"SubagentStart","agent_id":"` + id + `"}`)
-		}
+	markers := func() int {
+		e, _ := os.ReadDir(agents)
+		return len(e)
 	}
-	raw(`{"session_id":"` + sid + `","hook_event_name":"UserPromptSubmit"}`)
-	start("fg1", "bg1", "bg2")
+	ev("UserPromptSubmit", "")
+	for _, id := range []string{"fg1", "bg1", "c1"} {
+		ev("SubagentStart", `,"agent_id":"`+id+`"`)
+	}
+	if markers() != 3 {
+		t.Fatalf("setup: %d markers, want 3", markers())
+	}
 
-	raw(`{"session_id":"` + sid + `","hook_event_name":"Stop"}`) // older CLI: no field, no pruning
-	if n := count(); n != 3 {
-		t.Fatalf("no background_tasks field: agents = %d, want 3", n)
+	keeps := []struct{ name, extra string }{
+		{"no field", ""},
+		{"null field", `,"background_tasks":null`},
+		{"malformed field", `,"background_tasks":[{"id":123,"type":{"x":1}}]`},
+		{"not an array", `,"background_tasks":{"a":1}`},
+		{"background agent (its children are unlisted)", `,"background_tasks":[{"id":"bg1","type":"local_agent","status":"running"}]`},
+		{"workflow", `,"background_tasks":[{"id":"w","type":"local_workflow"}]`},
+		{"teammate", `,"background_tasks":[{"id":"t","type":"in_process_teammate"}]`},
+		{"remote agent", `,"background_tasks":[{"id":"r","type":"remote_agent"}]`},
+		{"unknown kind", `,"background_tasks":[{"id":"u","type":"something_new"}]`},
+		{"Stop from a sub-agent context", `,"agent_id":"bg1","background_tasks":[]`},
 	}
-	raw(`{"session_id":"` + sid + `","hook_event_name":"Stop","background_tasks":[{"id":"bg1","type":"local_agent","status":"running"},{"id":"w1","type":"local_workflow","status":"running"}]}`)
-	if n := count(); n != 3 {
-		t.Fatalf("workflow running: agents = %d, want 3 (its agents are not listed)", n)
+	for _, k := range keeps {
+		ev("UserPromptSubmit", "")
+		ev("Stop", k.extra)
+		if markers() != 3 {
+			t.Fatalf("%s: %d markers, want 3 kept", k.name, markers())
+		}
+		if r, _ := readRec(t, dir); r.State != "idle" {
+			t.Fatalf("%s: state %q, want idle (the field must not cost the event)", k.name, r.State)
+		}
 	}
-	raw(`{"session_id":"` + sid + `","hook_event_name":"SubagentStop","agent_id":"x","background_tasks":[]}`) // a sub-agent's own stop never prunes
-	if n := count(); n != 3 {
-		t.Fatalf("SubagentStop pruned: agents = %d, want 3", n)
+
+	ev("Stop", `,"background_tasks":[{"id":"b9","type":"local_bash","status":"running"},{"id":"m","type":"monitor_mcp"}]`)
+	if _, err := os.Stat(agents); !os.IsNotExist(err) {
+		t.Fatalf("only agentless work in the background: markers survive (%d)", markers())
 	}
-	raw(`{"session_id":"` + sid + `","hook_event_name":"Stop","background_tasks":[{"id":"bg1","type":"local_agent","status":"running"},{"id":"b9","type":"local_bash","status":"running"}]}`)
-	if n := count(); n != 1 {
-		t.Fatalf("after prune: agents = %d, want 1 (bg1 only)", n)
-	}
-	raw(`{"session_id":"` + sid + `","hook_event_name":"Stop","background_tasks":[]}`)
-	if n := count(); n != 0 {
-		t.Fatalf("nothing in the background: agents = %d, want 0", n)
+	ev("SubagentStart", `,"agent_id":"n1"`)
+	ev("Stop", `,"background_tasks":[]`)
+	if _, err := os.Stat(agents); !os.IsNotExist(err) {
+		t.Fatalf("empty background: markers survive (%d)", markers())
 	}
 }

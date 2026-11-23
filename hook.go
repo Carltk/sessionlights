@@ -31,17 +31,9 @@ type hookInput struct {
 	NotificationType string `json:"notification_type"`
 	Error            string `json:"error"`
 	AgentID          string `json:"agent_id"`
-	// BackgroundTasks is Stop's list of in-flight background work; nil when
-	// the Claude Code version does not send it.
-	BackgroundTasks *[]backgroundTask `json:"background_tasks"`
-}
-
-// backgroundTask is one entry of Stop's background_tasks. A sub-agent's task
-// id is its agent_id.
-type backgroundTask struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Status string `json:"status"`
+	// BackgroundTasks is Stop's list of in-flight background work, kept raw:
+	// a shape this hook does not expect must cost the prune, never the event.
+	BackgroundTasks json.RawMessage `json:"background_tasks"`
 }
 
 // record is a light file as the hook writes it: the documented format plus two
@@ -181,8 +173,8 @@ func handleHook(raw []byte, dir string, probe sessionProbe, proc Proc, now time.
 	case "UserPromptSubmit":
 		c = change{state: "busy", failures: "reset", capture: true}
 	case "Stop":
-		if in.AgentID == "" && in.BackgroundTasks != nil {
-			pruneAgents(path, *in.BackgroundTasks)
+		if in.AgentID == "" {
+			pruneAgents(path, in.BackgroundTasks)
 		}
 		c = change{state: "idle", failures: "keep"}
 	case "Notification":
@@ -308,33 +300,33 @@ func markAgent(lightPath, agentID string, start bool, now time.Time) error {
 	return nil
 }
 
-// pruneAgents drops the markers of sub-agents that are no longer running
-// when the main thread's turn ends. Foreground sub-agents finish inside the
-// turn, so at Stop only background ones (listed in background_tasks) may
-// still run; any other marker is one whose SubagentStop never fired, e.g. an
-// agent interrupted with Esc. Kinds of background work that run sub-agents
-// not listed one by one (a workflow, a teammate, a remote agent) keep every
-// marker, because their agents' ids are not in the list.
-func pruneAgents(lightPath string, tasks []backgroundTask) {
-	live := map[string]bool{}
+// agentlessTasks are the background task kinds known to run no sub-agents.
+var agentlessTasks = map[string]bool{"local_bash": true, "monitor_mcp": true, "mcp_task": true, "monitor_ws": true}
+
+// pruneAgents clears every sub-agent marker when the main thread's turn ends
+// with no agent-hosting work left in the background. Foreground sub-agents
+// finish inside the turn, so a marker left then is one whose SubagentStop
+// never fired (an agent interrupted with Esc). If any background task could
+// be running agents (a background agent, whose own children are not listed;
+// a workflow; a teammate; any kind not known to be agentless) nothing is
+// pruned, and a later quiet Stop clears what is stale. A missing field, or
+// one that does not parse, prunes nothing.
+func pruneAgents(lightPath string, raw json.RawMessage) {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return
+	}
+	var tasks []struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &tasks) != nil {
+		return
+	}
 	for _, t := range tasks {
-		switch t.Type {
-		case "local_agent":
-			live[safeIDRe.ReplaceAllString(t.ID, "")] = true
-		case "local_workflow", "in_process_teammate", "remote_agent":
+		if !agentlessTasks[t.Type] {
 			return
 		}
 	}
-	dir := AgentsDir(lightPath)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if !live[e.Name()] {
-			_ = os.Remove(filepath.Join(dir, e.Name()))
-		}
-	}
+	_ = os.RemoveAll(AgentsDir(lightPath))
 }
 
 // retry runs f up to 10 times, 15 ms apart, for Windows sharing violations
