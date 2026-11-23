@@ -25,7 +25,7 @@ SessionLights is a Claude Code [plugin](https://code.claude.com/docs/en/plugins)
 
 On Claude Code 2.1.275 or later, `/plugin install sessionlights --marketplace Carltk/sessionlights` does both in one step. Then type `/lights` to start the strip (Windows) or the bar (Linux).
 
-It runs on **Windows** and **x86-64 Linux**. On arm64 or macOS the hook cannot run, so don't install it there. Windows needs nothing else: no Go, no runtime. On Linux the bar needs a StatusNotifierItem host in the panel: Ubuntu's GNOME and KDE have one, while plain GNOME needs the AppIndicator extension.
+It runs on **Windows** and **x86-64 Linux**. On arm64 or macOS the hook cannot run, so don't install it there ([macOS help wanted](#macos-help-wanted)). Windows needs nothing else: no Go, no runtime. On Linux the bar needs a StatusNotifierItem host in the panel: Ubuntu's GNOME and KDE have one, while plain GNOME needs the AppIndicator extension.
 
 The plugin gives you:
 
@@ -85,6 +85,15 @@ sessionlights -once 2s       # print one sample and exit
 sessionlights -png bar.png   # render the bar once to a PNG
 sessionlights uninstall      # remove the extension, autostart and any copied binary
 ```
+
+## macOS: help wanted
+
+There is no Mac here to build or test on, so macOS support is waiting for someone who has one. The plan is in [issue #1](https://github.com/Carltk/sessionlights/issues/1), and it can land in two parts:
+
+- **The hook**, mostly pure Go. It needs a darwin `sessionProbe` that finds the `claude` process through `sysctl` rather than `/proc`, and a small `sh` dispatcher at `bin/sessionlights` that runs the right binary for the OS and CPU. The dispatcher also brings arm64 Linux for free.
+- **A viewer**, probably in the menu bar like the Linux bar, with stats from Mach, `sysctl` and IOKit, and click-to-focus that brings the session's terminal app to the front.
+
+PRs for either part are welcome.
 
 ## Where the lights come from
 
