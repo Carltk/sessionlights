@@ -278,8 +278,8 @@ func (s *strip) tick() {
 }
 
 // follow notices the end of a drag: the position changed, then held still for
-// one beat. GetWindowRect sends no message, so it is safe off the window
-// thread; the move itself goes through w.Run.
+// one beat. GetWindowRect sends no message, so polling it off the window
+// thread is safe; the snap itself reads and moves on that thread.
 func (s *strip) follow() {
 	var last [2]int
 	moving := true // a restored position near the top snaps too
@@ -299,9 +299,18 @@ func (s *strip) follow() {
 			continue
 		}
 		moving = false
-		if top, ok := monitorTop(hwnd); ok && y != top && y-top > -snapPx && y-top < snapPx {
-			s.w.Run(func() { moveWindow(hwnd, x, top) })
-			last[1] = top
+		// The test above runs in this goroutine's coordinates, which Windows
+		// scales down when the display is over 100% (only Gio's window thread
+		// is DPI-aware). The move re-reads both numbers on that thread, or the
+		// snap would also slide the strip left by the scale factor.
+		s.w.Run(func() {
+			x, y, ok := windowPos(hwnd)
+			if top, okTop := monitorTop(hwnd); ok && okTop && y != top && y-top > -snapPx && y-top < snapPx {
+				moveWindow(hwnd, x, top)
+			}
+		})
+		if x, y, ok := windowPos(hwnd); ok {
+			last = [2]int{x, y}
 		}
 		s.savePosIfMoved()
 	}
