@@ -1,5 +1,6 @@
 {
   "name": "sessionlights",
+  "description": "SessionLights: one coloured light per Claude Code session, on Windows and x86-64 Linux.",
   "owner": { "name": "Carltk", "url": "https://github.com/Carltk" },
   "plugins": [
     {
