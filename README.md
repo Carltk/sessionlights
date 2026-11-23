@@ -62,13 +62,13 @@ The repo is a Claude Code [plugin](https://code.claude.com/docs/en/plugins). Ins
 
 On Claude Code 2.1.275 or later, `/plugin install sessionlights --marketplace Carltk/sessionlights` does both in one step.
 
-That gives you everything, with no Go and nothing else to install:
+It runs on Windows and on x86-64 Linux. On arm64 or macOS the hook cannot run, so don't install it there. On Windows that is everything, with no Go and nothing else to install. On Linux the bar also needs a StatusNotifierItem host: Ubuntu's GNOME and KDE have one, while plain GNOME needs the AppIndicator extension. You get:
 
 - **The hook.** Every session reports its state from then on. Sessions that were already open start reporting once they are restarted.
 - **The `/lights` skill.** Type `/lights`, or ask Claude to "show the session lights". On Windows it starts a strip on the desktop you are on. On Linux it runs `sessionlights install` (once is enough, but it is safe to repeat) and starts the bar.
-- **The binaries**: `bin/sessionlights.exe` for Windows and `bin/sessionlights` for Linux (x86-64). Each is both the viewer and the hook. The hook command names `bin/sessionlights` with no extension, and Windows runs the `.exe` beside it.
+- **The binaries**: `bin/sessionlights.exe` for Windows and `bin/sessionlights` for Linux (x86-64). Each is both the viewer and the hook. The hook command names `bin/sessionlights` with no extension and gives its argument in `args`, so Claude Code starts it directly rather than through a shell, and Windows then runs the `.exe` beside it.
 
-To start a strip at login on Windows, put a shortcut to the plugin's `bin/sessionlights.exe` in `shell:startup`. On Linux, `/lights` sets up the autostart for you. `/plugin` shows where the plugin is installed.
+To start a strip at login on Windows, put a shortcut to the plugin's `bin/sessionlights.exe` in `shell:startup`. The plugin's folder is per version, so make the shortcut again after a plugin update. On Linux, `/lights` sets up the autostart for you: it copies the binary out of the plugin cache to `~/.local/share/sessionlights/` and points autostart there, so an update does not break it, and each `/lights` refreshes the copy. `/plugin` shows where the plugin is installed.
 
 ## Build it yourself
 

@@ -64,3 +64,63 @@ func TestInstallUninstallInTempHome(t *testing.T) {
 		t.Error("extension left behind")
 	}
 }
+
+// A binary in Claude Code's plugin cache is copied to a stable path, because
+// an update deletes its per-version folder; any other binary is used in place.
+func TestStableExe(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(tmp, "data"))
+	cached := filepath.Join(tmp, ".claude", "plugins", "cache", "m", "sessionlights", "1.1.0", "bin", "sessionlights")
+	if err := os.MkdirAll(filepath.Dir(cached), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cached, []byte("v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := stableExe(cached)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(tmp, "data", "sessionlights", "sessionlights")
+	if got != want {
+		t.Fatalf("stableExe = %q, want %q", got, want)
+	}
+	st, err := os.Stat(got)
+	if err != nil || st.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("copy not executable: %v %v", st, err)
+	}
+	// A later version replaces the copy.
+	if err := os.WriteFile(cached, []byte("v2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stableExe(cached); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(want); string(b) != "v2" {
+		t.Errorf("copy = %q, want v2", b)
+	}
+	if p, _ := stableExe("/home/u/.local/bin/sessionlights"); p != "/home/u/.local/bin/sessionlights" {
+		t.Errorf("non-cache path moved to %q", p)
+	}
+}
+
+// With CLAUDE_CONFIG_DIR set the hook writes under it, so the autostarted bar
+// (which will not see the variable) is given the folder.
+func TestInstallPassesConfigDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(tmp, "data"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "config"))
+	t.Setenv("PATH", "")
+	t.Setenv("SESSIONLIGHTS_DIR", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(tmp, "cc"))
+	if err := runInstall(""); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(autostartFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `-dir "` + filepath.Join(tmp, "cc", "session-lights") + `"`; !strings.Contains(string(b), want) {
+		t.Errorf("autostart lacks %s:\n%s", want, b)
+	}
+}

@@ -35,8 +35,8 @@ so a path with a space in it would otherwise split.
 
 The bar lives in the top panel (GNOME with the AppIndicator extension, KDE, or
 any StatusNotifierItem tray). Run `install` first, every time: it is quick and
-idempotent, and it points the login autostart at this plugin version's binary,
-which moves when the plugin updates.
+idempotent, and it refreshes the copy of the binary that the login autostart
+runs, so autostart picks up plugin updates.
 
 ```
 sessionlights install && setsid -f sessionlights >/dev/null 2>&1
@@ -46,6 +46,10 @@ Tell the user what `install` printed. The first time it enables a small GNOME
 Shell extension that only takes effect after they log out and back in; until
 then the bar works but double-clicking a session cannot raise its terminal.
 If it suggests a kitty `listen_on` line, pass that on too.
+
+If the process runs but the user sees no bar, the desktop has no tray host.
+Plain GNOME (Fedora, Arch) needs the AppIndicator and KStatusNotifierItem
+Support extension; Ubuntu ships it enabled.
 
 ## Both
 

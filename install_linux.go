@@ -109,6 +109,37 @@ func kittyHasListenOn(conf string) bool {
 	return false
 }
 
+// stableDir holds the copy of the binary that autostart runs when the
+// installed binary lives in Claude Code's plugin cache.
+func stableDir() string { return filepath.Join(dataHome(), "sessionlights") }
+
+// stableExe returns the path autostart should run. A binary inside Claude
+// Code's plugin cache sits in a per-version folder that an update deletes, so
+// it is copied to stableDir (temp file + rename: a running bar keeps its old
+// copy) and that copy is used. Any other path, e.g. ~/.local/bin, is used as is.
+func stableExe(exe string) (string, error) {
+	if !strings.Contains(filepath.ToSlash(exe), "/plugins/cache/") {
+		return exe, nil
+	}
+	b, err := os.ReadFile(exe)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(stableDir(), 0o755); err != nil {
+		return "", err
+	}
+	dst := filepath.Join(stableDir(), "sessionlights")
+	tmp := dst + ".new"
+	if err := os.WriteFile(tmp, b, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	return dst, nil
+}
+
 func runInstall(dir string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -116,6 +147,15 @@ func runInstall(dir string) error {
 	}
 	if exe, err = filepath.EvalSymlinks(exe); err != nil {
 		return err
+	}
+	if exe, err = stableExe(exe); err != nil {
+		return fmt.Errorf("copy out of the plugin cache: %w", err)
+	}
+	// A bar started at login does not see CLAUDE_CONFIG_DIR or
+	// SESSIONLIGHTS_DIR, so when either moves where the hook writes, autostart
+	// is told the folder explicitly.
+	if dir == "" && (os.Getenv("CLAUDE_CONFIG_DIR") != "" || os.Getenv("SESSIONLIGHTS_DIR") != "") {
+		dir = lightsDir()
 	}
 
 	// 1. The shell extension.
@@ -177,7 +217,7 @@ func runUninstall() error {
 			_ = exec.Command("gsettings", "set", "org.gnome.shell", "enabled-extensions", list).Run()
 		}
 	}
-	for _, p := range []string{extensionDir(), autostartFile()} {
+	for _, p := range []string{extensionDir(), autostartFile(), stableDir()} {
 		if err := os.RemoveAll(p); err != nil {
 			return err
 		}
