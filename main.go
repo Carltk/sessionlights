@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
 	"log"
 	"os"
 	"os/exec"
@@ -117,13 +118,16 @@ type strip struct {
 	w             *app.Window
 	vd            vdExe // set: pinned to every desktop
 
-	view   atomic.Pointer[View]
-	frames atomic.Int64
-	stats  atomic.Pointer[Stats]
-	gpuOK  atomic.Bool // the GPU has been read at least once
-	tip    tooltip     // hover text; touched on the window thread only
-	tipMu  sync.Mutex
-	tipFor string // the box the hover text is for, "" when hidden
+	view    atomic.Pointer[View]
+	frames  atomic.Int64
+	stats   atomic.Pointer[Stats]
+	gpuOK   atomic.Bool // the GPU has been read at least once
+	tip     tooltip     // hover text; touched on the window thread only
+	tipMu   sync.Mutex
+	tipFor  string // the box the hover text is for, "" when hidden
+	tipText string
+	// wantSize is the latest window size the layout asked for, in px.
+	wantSize atomic.Pointer[image.Point]
 
 	mu      sync.Mutex
 	hwnd    uintptr
@@ -366,6 +370,16 @@ func (s *strip) tipKey() string {
 	return s.tipFor
 }
 
+// tipShowing is the key and text of the hover text, "" when hidden.
+func (s *strip) tipShowing() string {
+	s.tipMu.Lock()
+	defer s.tipMu.Unlock()
+	if s.tipFor == "" {
+		return ""
+	}
+	return s.tipFor + "\x00" + s.tipText
+}
+
 // hover shows box key's text just under the strip, left-aligned with the box
 // that starts slotX pixels into the window.
 func (s *strip) hover(key, text string, slotX int) {
@@ -376,17 +390,21 @@ func (s *strip) hover(key, text string, slotX int) {
 		return
 	}
 	s.tipMu.Lock()
-	if s.tipFor == key {
+	if s.tipFor == key && s.tipText == text {
 		s.tipMu.Unlock()
 		return
 	}
 	watching := s.tipFor != ""
-	s.tipFor = key
+	s.tipFor, s.tipText = key, text
 	s.tipMu.Unlock()
 	// Measured on the window thread: Gio makes that thread DPI-aware, but
 	// not the process, so GetWindowRect from any other goroutine returns
-	// scaled-down coordinates at anything over 100%.
+	// scaled-down coordinates at anything over 100%. Shown only if it is
+	// still the wanted text: a hide queued after this one may have run first.
 	s.w.Run(func() {
+		if s.tipShowing() != key+"\x00"+text {
+			return
+		}
 		if l, _, _, b, ok := windowRect(hwnd); ok {
 			s.tip.show(hwnd, l+slotX, b+2, text)
 		}
@@ -403,9 +421,13 @@ func (s *strip) unhover(key string) {
 		s.tipMu.Unlock()
 		return
 	}
-	s.tipFor = ""
+	s.tipFor, s.tipText = "", ""
 	s.tipMu.Unlock()
-	s.w.Run(func() { s.tip.hide() })
+	s.w.Run(func() {
+		if s.tipKey() == "" { // a newer hover may have queued its show first
+			s.tip.hide()
+		}
+	})
 }
 
 // watchTipLeave hides the text once the cursor is off the strip. Gio on

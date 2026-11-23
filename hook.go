@@ -153,7 +153,12 @@ func handleHook(raw []byte, dir string, probe sessionProbe, proc Proc, now time.
 		return markAgent(path, in.AgentID, in.Event == "SubagentStart", now)
 	case "PostToolUse":
 		// Fires after every tool, so it only writes when it has something to
-		// say: a tool ran, so a waiting light's permission was granted.
+		// say: a tool ran, so a waiting light's permission was granted. A
+		// sub-agent's tools share the session id but say nothing about the
+		// prompt the main thread is waiting on, so they are ignored.
+		if in.AgentID != "" {
+			return nil
+		}
 		var prev record
 		if b, err := os.ReadFile(path); err != nil || json.Unmarshal(b, &prev) != nil || prev.State != "waiting" {
 			return nil
@@ -280,8 +285,10 @@ func markAgent(lightPath, agentID string, start bool, now time.Time) error {
 			return err
 		}
 	} else {
+		// The folder stays: removing it when empty would race a concurrent
+		// start between its MkdirAll and WriteFile. SessionStart, SessionEnd
+		// and the sweep remove it.
 		_ = os.Remove(marker)
-		_ = os.Remove(dir) // only succeeds once it is empty
 	}
 	_ = os.Chtimes(lightPath, now, now)
 	return nil

@@ -101,29 +101,39 @@ func countIface(flags uint8, oper uint32) bool {
 	return flags&ifHardware != 0 && flags&ifFilter == 0 && oper == windows.IfOperStatusUp
 }
 
-func readNet() (netBytes, bool) {
+// readNet is each counted adapter's lifetime byte counters, by LUID.
+func readNet() (map[uint64]netBytes, bool) {
 	var t *windows.MibIfTable2
 	if err := windows.GetIfTable2Ex(windows.MibIfTableRaw, &t); err != nil {
-		return netBytes{}, false
+		return nil, false
 	}
 	defer windows.FreeMibTable(unsafe.Pointer(t))
-	var n netBytes
+	n := map[uint64]netBytes{}
 	for _, row := range unsafe.Slice(&t.Table[0], t.NumEntries) {
 		if countIface(row.InterfaceAndOperStatusFlags, row.OperStatus) {
-			n.rx += row.InOctets
-			n.tx += row.OutOctets
+			n[row.InterfaceLuid] = netBytes{rx: row.InOctets, tx: row.OutOctets}
 		}
 	}
 	return n, true
 }
 
-// rate is bytes per second between two counter readings, -1 when a counter
-// went backwards (an adapter left) or no time passed.
-func rate(a, b uint64, dt time.Duration) float64 {
-	if b < a || dt <= 0 {
-		return -1
+// netRates sums per-adapter deltas over adapters present in both readings.
+// Summing totals first would count an adapter that just came up (Wi-Fi
+// reconnecting, a dock) with its whole lifetime of bytes in one tick.
+func netRates(a, b map[uint64]netBytes, dt time.Duration) (rx, tx float64) {
+	if dt <= 0 {
+		return -1, -1
 	}
-	return float64(b-a) / dt.Seconds()
+	var drx, dtx uint64
+	for luid, now := range b {
+		was, ok := a[luid]
+		if !ok || now.rx < was.rx || now.tx < was.tx {
+			continue // new, or its counters reset
+		}
+		drx += now.rx - was.rx
+		dtx += now.tx - was.tx
+	}
+	return float64(drx) / dt.Seconds(), float64(dtx) / dt.Seconds()
 }
 
 // ---- GPU ---------------------------------------------------------------------
@@ -168,6 +178,9 @@ const (
 	pdhCStatusNew = 1
 )
 
+// pdhFmtItem is PDH_FMT_COUNTERVALUE_ITEM_W as laid out on amd64 (the value
+// at offset 16). On 386 Go would align the float64 differently; only amd64
+// is built.
 type pdhFmtItem struct {
 	name   *uint16
 	status uint32
@@ -206,19 +219,32 @@ func (g *gpuQuery) sample() float64 {
 		g.primed = true
 		return -1
 	}
+	// The instance list can grow between asking the size and reading (a
+	// process starts using the GPU), which answers PDH_MORE_DATA again: ask
+	// again with the new size, a few times at most.
 	var size, count uint32
-	r, _, _ := pPdhGetFormattedCounterA.Call(g.counter, pdhFmtDouble|pdhFmtNoCap, uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&count)), 0)
-	if uint32(r) != pdhMoreData || size == 0 {
-		if r == 0 { // no instances: an idle GPU nobody is using
-			return 0
+	ok := false
+	for try := 0; try < 3 && !ok; try++ {
+		size, count = 0, 0
+		r, _, _ := pPdhGetFormattedCounterA.Call(g.counter, pdhFmtDouble|pdhFmtNoCap, uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&count)), 0)
+		if uint32(r) != pdhMoreData || size == 0 {
+			if r == 0 { // no instances: an idle GPU nobody is using
+				return 0
+			}
+			return -1
 		}
-		return -1
+		if int(size) > len(g.buf) {
+			g.buf = make([]byte, size)
+		}
+		r, _, _ = pPdhGetFormattedCounterA.Call(g.counter, pdhFmtDouble|pdhFmtNoCap, uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&count)), uintptr(unsafe.Pointer(&g.buf[0])))
+		switch {
+		case r == 0:
+			ok = true
+		case uint32(r) != pdhMoreData:
+			return -1
+		}
 	}
-	if int(size) > len(g.buf) {
-		g.buf = make([]byte, size)
-	}
-	r, _, _ = pPdhGetFormattedCounterA.Call(g.counter, pdhFmtDouble|pdhFmtNoCap, uintptr(unsafe.Pointer(&size)), uintptr(unsafe.Pointer(&count)), uintptr(unsafe.Pointer(&g.buf[0])))
-	if r != 0 {
+	if !ok {
 		return -1
 	}
 	items := unsafe.Slice((*pdhFmtItem)(unsafe.Pointer(&g.buf[0])), count)
@@ -236,7 +262,7 @@ func (g *gpuQuery) sample() float64 {
 type sampler struct {
 	t            time.Time
 	cpu          cpuTimes
-	net          netBytes
+	net          map[uint64]netBytes
 	cpuOK, netOK bool // the previous reading of each is usable
 	gpu          *gpuQuery
 	gpuAt        time.Time // when the GPU was last collected
@@ -276,8 +302,7 @@ func (s *sampler) Sample(now time.Time) Stats {
 	}
 	if netOK && s.netOK {
 		dt := now.Sub(s.t)
-		out.RxBps = rate(s.net.rx, net.rx, dt)
-		out.TxBps = rate(s.net.tx, net.tx, dt)
+		out.RxBps, out.TxBps = netRates(s.net, net, dt)
 	}
 	s.t, s.cpu, s.net, s.cpuOK, s.netOK = now, cpu, net, cpuOK, netOK
 	return out

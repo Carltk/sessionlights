@@ -311,6 +311,10 @@ func TestHookSubagentsAndPermissionClear(t *testing.T) {
 	if r, _ := readRec(t, dir); r.State != "waiting" {
 		t.Fatalf("state = %q, want waiting", r.State)
 	}
+	ev("PostToolUse", map[string]string{"agent_id": "a2"}) // a sub-agent's tool says nothing about the main prompt
+	if r, _ := readRec(t, dir); r.State != "waiting" {
+		t.Fatalf("sub-agent PostToolUse cleared the wait: state %q", r.State)
+	}
 	ev("PostToolUse", nil)
 	if r, _ := readRec(t, dir); r.State != "busy" || r.Detail != "" {
 		t.Errorf("after the approved tool: state %q detail %q, want busy and no detail", r.State, r.Detail)

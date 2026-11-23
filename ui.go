@@ -113,7 +113,14 @@ func (u *ui) fit(gtx layout.Context, size image.Point) {
 		return
 	}
 	u.want = size
-	go u.s.w.Run(func() { resizeWindow(hwnd, size.X, size.Y) })
+	// The closure reads the latest wanted size rather than its own copy, so
+	// two quick changes cannot land in the wrong order.
+	u.s.wantSize.Store(&size)
+	go u.s.w.Run(func() {
+		if sz := u.s.wantSize.Load(); sz != nil {
+			resizeWindow(hwnd, sz.X, sz.Y)
+		}
+	})
 }
 
 func (u *ui) strip(gtx layout.Context, v View) layout.Dimensions {
@@ -366,7 +373,8 @@ func (u *ui) handle(gtx layout.Context, v View) {
 				// Move too, not just Enter: Gio sends no Leave when the
 				// pointer exits the window, so coming back onto the same box
 				// brings no new Enter.
-				if !u.drag.active && u.s.tipKey() != b.Key {
+				// Text too, so a hovered box whose state changes updates.
+				if !u.drag.active && u.s.tipShowing() != b.Key+"\x00"+b.Tip {
 					key, tip, slotX := b.Key, b.Tip, u.slots[b.Key].Min.X
 					go u.s.hover(key, tip, slotX)
 				}
@@ -510,8 +518,11 @@ func (u *ui) segment(gtx layout.Context, seg segment) layout.Dimensions {
 				m := op.Record(gtx.Ops)
 				w := u.label(gtx, slot, 12, r.Col, true).Size.X
 				m.Stop()
-				gtx.Constraints.Min.X = w
-				return u.label(gtx, r.Text, 12, r.Col, true)
+				// label resets Constraints.Min, so the slot is applied to
+				// the result instead.
+				d := u.label(gtx, r.Text, 12, r.Col, true)
+				d.Size.X = max(d.Size.X, w)
+				return d
 			}))
 		}
 	}

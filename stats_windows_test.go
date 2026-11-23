@@ -39,12 +39,19 @@ func TestCountIface(t *testing.T) {
 	}
 }
 
-func TestRate(t *testing.T) {
-	if got := rate(1000, 3000, 2*time.Second); got != 1000 {
-		t.Errorf("rate = %v, want 1000", got)
+func TestNetRates(t *testing.T) {
+	a := map[uint64]netBytes{1: {rx: 1000, tx: 500}, 2: {rx: 5000, tx: 5000}}
+	b := map[uint64]netBytes{
+		1: {rx: 3000, tx: 1500},       // +2000 / +1000 over 2 s
+		2: {rx: 10, tx: 10},           // counters reset: skipped
+		3: {rx: 9_000_000_000, tx: 1}, // just came up: its lifetime bytes are not a rate
 	}
-	if got := rate(3000, 1000, time.Second); got != -1 {
-		t.Errorf("backwards = %v, want -1", got)
+	rx, tx := netRates(a, b, 2*time.Second)
+	if rx != 1000 || tx != 500 {
+		t.Errorf("netRates = %v/%v, want 1000/500", rx, tx)
+	}
+	if rx, _ := netRates(a, b, 0); rx != -1 {
+		t.Errorf("zero interval = %v, want -1", rx)
 	}
 }
 
