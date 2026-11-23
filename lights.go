@@ -311,7 +311,7 @@ var stateWords = map[string]string{
 	"failed":  "failed, needs attention",
 }
 
-// tipText is a box's hover text: "PAI Research: waiting for you · Claude
+// tipText is a box's hover text: "Docs rewrite: waiting for you · Claude
 // needs your permission to use Bash · 2 sub-agents".
 func tipText(l Light) string {
 	s := strings.TrimSpace(l.Name)
