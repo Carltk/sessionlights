@@ -1,6 +1,8 @@
 # SessionLights
 
-A tiny always-on-top strip for Windows (and a top-panel bar on Linux) that shows what each of your [Claude Code](https://code.claude.com) sessions is doing: one box per session, with a dot coloured by its state. You can see at a glance which session is waiting on you without cycling through terminal tabs.
+One coloured light per [Claude Code](https://code.claude.com) session, always in view, so you can see which session is waiting on you without cycling through terminal tabs. On Windows it is a slim always-on-top strip with a clock and system stats; on Linux it is a stats bar in the top panel.
+
+![The Windows strip: a clock, five sessions in their state colours, then CPU, GPU, memory and network](docs/strip.png)
 
 | Dot | Meaning |
 |---|---|
@@ -10,103 +12,99 @@ A tiny always-on-top strip for Windows (and a top-panel bar on Linux) that shows
 | deep red | the turn failed on an API error: needs attention |
 | small amber dot + number | that many sub-agents running |
 
-Hover a box for its full name, its state in words and the detail (the permission it wants, the error).
+Hover a session for its full name, its state in words and the detail (the permission it wants, the error).
 
-It is written in Go with [Gio](https://gioui.org), builds without a C compiler, and redraws only when something changes. At idle it uses about 56 MB of RAM and no measurable CPU.
+## Install
 
-## Using it
-
-- **Drag** the grip on the left edge to move the strip. A pinned strip keeps one position everywhere; an unpinned one remembers a position per virtual desktop.
-- **Click** a session to bring its terminal to the front. If the terminal is on another virtual desktop, Windows switches to it.
-- **Drag** a session sideways to reorder it. Sessions are grouped by the virtual desktop their terminal is on, in Task View order, so a session moves only within its own desktop's group. The order is shared by every strip.
-- **Right-click** to close.
-- A **ring** marks sessions whose terminal is on the desktop you are looking at. It updates within a second of a switch when pinned (see `-vd`), a few seconds otherwise.
-- The blue **badge** after the grip is the number of the desktop you are looking at (pinned) or the strip sits on (unpinned), plus its name if you have renamed it in Task View. The small number before each group is that group's desktop.
-
-With `-vd` one strip is pinned to every desktop: it follows you and keeps one position for every desktop. Without it, one strip runs per virtual desktop, so you start one on each desktop where you want it. Either way a second strip that would duplicate one does nothing: the new copy exits by itself.
-
-Each box is labelled with the session's title if you have given it one with Claude Code's built-in `/rename` (or `claude --name`), otherwise with the folder the session runs in.
-
-## Linux: a stats bar in the top panel
-
-On Linux the same binary is a small system-stats bar in the spirit of [ULBar](https://ulbar.io): CPU, GPU, memory and network as colour-banded numbers, with one dot per live Claude Code session to their left. Wayland lets no app keep a floating window on top, so it lives in the top panel as StatusNotifierItems (GNOME with the AppIndicator extension, which Ubuntu ships enabled; KDE and most Wayland bars also host them).
-
-```
-go build -o ~/.local/bin/sessionlights .
-sessionlights install        # once: shell extension, autostart (log out and in after)
-sessionlights &              # the bar
-sessionlights -once 2s       # print one sample and exit
-sessionlights -png bar.png   # render the bar once to a PNG
-sessionlights uninstall      # remove the extension and autostart
-```
-
-Each live session gets its own item: a short name in its state colour. **Double-click it to jump to that session's terminal** (Ubuntu's AppIndicator host only sends a click to the app on a double-click). Wayland lets no ordinary app raise another app's window, so `install` adds a ~70-line GNOME Shell extension (`gnome-extension/`) whose only job is raising the window that owns a process. In kitty a double-click also picks the session's tab, provided kitty has a remote-control socket: add `listen_on unix:@kitty` to `kitty.conf` and restart kitty.
-
-| Stat | Source | Colour |
-|---|---|---|
-| CPU | `/proc/stat` deltas | green < 25% · yellow-green < 50% · amber < 75% · red |
-| GPU | DRM fdinfo engine time, busiest engine (Intel, AMD, any driver that reports it); no root | as CPU |
-| MEM | `MemTotal − MemAvailable` | as CPU, by share of total |
-| ↓ ↑ | `/proc/net/dev`, physical interfaces only | download greens brighten with speed; upload runs orange to red |
-
-Every threshold is one constant in `stats.go`. No subprocesses, no network calls: everything is read from `/proc` and `/sys`. `sessionlights hook` works on Linux too and finds the `claude` process from `/proc`.
-
-## Install as a Claude Code plugin
-
-The repo is a Claude Code [plugin](https://code.claude.com/docs/en/plugins). Inside Claude Code:
+SessionLights is a Claude Code [plugin](https://code.claude.com/docs/en/plugins), and this repo is its marketplace. Inside Claude Code:
 
 ```
 /plugin marketplace add Carltk/sessionlights
 /plugin install sessionlights@sessionlights
 ```
 
-On Claude Code 2.1.275 or later, `/plugin install sessionlights --marketplace Carltk/sessionlights` does both in one step.
+On Claude Code 2.1.275 or later, `/plugin install sessionlights --marketplace Carltk/sessionlights` does both in one step. Then type `/lights` to start the strip (Windows) or the bar (Linux).
 
-It runs on Windows and on x86-64 Linux. On arm64 or macOS the hook cannot run, so don't install it there. On Windows that is everything, with no Go and nothing else to install. On Linux the bar also needs a StatusNotifierItem host: Ubuntu's GNOME and KDE have one, while plain GNOME needs the AppIndicator extension. You get:
+It runs on **Windows** and **x86-64 Linux**. On arm64 or macOS the hook cannot run, so don't install it there. Windows needs nothing else: no Go, no runtime. On Linux the bar needs a StatusNotifierItem host in the panel: Ubuntu's GNOME and KDE have one, while plain GNOME needs the AppIndicator extension.
+
+The plugin gives you:
 
 - **The hook.** Every session reports its state from then on. Sessions that were already open start reporting once they are restarted.
 - **The `/lights` skill.** Type `/lights`, or ask Claude to "show the session lights". On Windows it starts a strip on the desktop you are on. On Linux it runs `sessionlights install` (once is enough, but it is safe to repeat) and starts the bar.
-- **The binaries**: `bin/sessionlights.exe` for Windows and `bin/sessionlights` for Linux (x86-64). Each is both the viewer and the hook. The hook command names `bin/sessionlights` with no extension and gives its argument in `args`, so Claude Code starts it directly rather than through a shell, and Windows then runs the `.exe` beside it.
+- **The binaries**: `bin/sessionlights.exe` for Windows and `bin/sessionlights` for Linux. Each is both the viewer and the hook.
 
-To start a strip at login on Windows, put a shortcut to the plugin's `bin/sessionlights.exe` in `shell:startup`. The plugin's folder is per version, so make the shortcut again after a plugin update. On Linux, `/lights` sets up the autostart for you: it copies the binary out of the plugin cache to `~/.local/share/sessionlights/` and points autostart there, so an update does not break it, and each `/lights` refreshes the copy. `/plugin` shows where the plugin is installed.
+To start the strip at login on Windows, put a shortcut to the plugin's `bin/sessionlights.exe` in `shell:startup`. The plugin's folder is per version, so make the shortcut again after a plugin update. On Linux, `/lights` sets up the autostart for you: it copies the binary out of the plugin cache to `~/.local/share/sessionlights/` and points autostart there, so an update does not break it, and each `/lights` refreshes the copy. `/plugin` shows where the plugin is installed.
 
-## Build it yourself
+## The Windows strip
 
-You need [Go](https://go.dev/dl/) 1.26 or later.
+From left to right: a grip, the clock, a blue badge with the virtual desktop's number (and its Task View name, if you gave it one), the sessions, then the stats.
+
+- **Click** a session to bring its terminal to the front. If the terminal is on another virtual desktop, Windows switches to it.
+- **Drag** the grip on the left edge to move the strip. Let go near the top of the screen and it snaps there.
+- **Drag** a session sideways to reorder it. Sessions are grouped by the virtual desktop their terminal is on, in Task View order, and the order is shared by every strip.
+- **Right-click** to close.
+- A **ring** marks sessions whose terminal is on the desktop you are looking at.
+
+Each session is labelled with its title if you gave it one with Claude Code's `/rename` (or `claude --name`), otherwise with the folder it runs in, cut to about 10 characters.
+
+**Stats** sit on the right, each in a colour band so you read the load before the number:
+
+| Stat | Source | Colour |
+|---|---|---|
+| `C` CPU | `GetSystemTimes` deltas | green < 25% · yellow-green < 50% · amber < 75% · red |
+| `G` GPU | the busiest engine in the `GPU Engine` performance counters, sampled every 10 s | as CPU |
+| `M` memory | used / total GB from `GlobalMemoryStatusEx` | as CPU, by share of total |
+| ▼ ▲ | bytes/s over physical network adapters only | download greens brighten with speed; upload runs orange to red |
+
+The strip redraws only when something it shows changes. It uses about 0.5% of one CPU core and around 100 MB of RAM.
+
+**Pinned or per desktop.** By default one strip runs per virtual desktop, so you start one on each desktop where you want it. With `-vd` (below), one strip is pinned to every desktop, follows you, and keeps one position everywhere. Either way a second strip that would duplicate one exits by itself.
+
+## The Linux bar
+
+On Linux the same binary is a small system-stats bar in the spirit of [ULBar](https://ulbar.io): CPU, GPU, memory and network as colour-banded numbers, with one item per live session to their left. Wayland lets no app keep a floating window on top, so it lives in the top panel as StatusNotifierItems.
+
+Each session's item is a short name in its state colour. **Double-click it to jump to that session's terminal** (Ubuntu's AppIndicator host only passes a click on as a double-click). Wayland lets no ordinary app raise another app's window, so `install` adds a ~70-line GNOME Shell extension (`gnome-extension/`) whose only job is raising the window that owns a process; it takes effect after you next log in. In kitty a double-click also picks the session's tab, provided kitty has a remote-control socket: add `listen_on unix:@kitty` to `kitty.conf` and restart kitty.
+
+| Stat | Source |
+|---|---|
+| CPU | `/proc/stat` deltas |
+| GPU | DRM fdinfo engine time, busiest engine (Intel, AMD, any driver that reports it); no root |
+| MEM | `MemTotal − MemAvailable` |
+| ↓ ↑ | `/proc/net/dev`, physical interfaces only |
+
+The colours match the Windows strip. No subprocesses, no network calls: everything is read from `/proc` and `/sys`.
+
+Without the plugin:
 
 ```
-git clone https://github.com/Carltk/sessionlights
-cd sessionlights
-GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-H windowsgui -s -w" -o bin/sessionlights.exe .
+go build -o ~/.local/bin/sessionlights .
+sessionlights install        # once: shell extension and autostart (log out and in after)
+sessionlights &              # the bar
+sessionlights -once 2s       # print one sample and exit
+sessionlights -png bar.png   # render the bar once to a PNG
+sessionlights uninstall      # remove the extension, autostart and any copied binary
 ```
-
-Those commands are for Git Bash. In PowerShell, set `$env:GOARCH="amd64"; $env:CGO_ENABLED="0"` first. `-H windowsgui` stops a console window opening alongside the strip, and when the exe runs as a hook. `-trimpath` keeps your own folder names out of the binary. Close any running strip before rebuilding, because Windows won't replace a running exe.
-
-The plugin's Linux binary is a cross-build from the same tree:
-
-```
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/sessionlights .
-```
-
-To use your build as the plugin, point Claude Code at the folder: `claude --plugin-dir <path to the clone>` for one session, or `/plugin marketplace add <path to the clone>` to install it.
 
 ## Where the lights come from
 
-The strip only displays sessions. Something has to report them: a Claude Code [hook](https://code.claude.com/docs/en/hooks) that writes one JSON file per session and updates it as the session changes state. The plugin's hook is `sessionlights hook`, which reads the event Claude Code passes on stdin:
+The viewer only displays sessions. The plugin's hook, `sessionlights hook`, writes one JSON file per session and updates it from the events Claude Code passes on stdin:
 
 | Event | Light |
 |---|---|
 | `SessionStart` | idle |
 | `UserPromptSubmit` | busy (tool failure count reset) |
-| `PostToolUseFailure` | busy, with "N tool failures" as detail |
 | `Notification` asking for permission or input | waiting |
+| `PostToolUse` | back to busy after a permission was granted |
+| `PostToolUseFailure` | busy, with "N tool failures" as detail |
+| `SubagentStart` / `SubagentStop` | adds / removes one sub-agent marker |
 | `Stop` | idle |
 | `StopFailure` | failed, with the error as detail |
 | `SessionEnd` | file removed |
 
-It always exits 0 and stays silent, so a broken light can never block a session. Any other producer that writes the same format works too.
+The hook always exits 0 and stays silent, so a broken light can never block a session. Any other producer that writes the same format works too.
 
-Hook and strip both use `~/.claude/session-lights/` (inside `CLAUDE_CONFIG_DIR` if you set it). Set `SESSIONLIGHTS_DIR` to move the hook's folder, and pass the strip `-dir <folder>` to match. Each file looks like this:
+Hook and viewer both use `~/.claude/session-lights/` (inside `CLAUDE_CONFIG_DIR` if you set it). Set `SESSIONLIGHTS_DIR` to move the hook's folder, and pass the viewer `-dir <folder>` to match. Each file looks like this:
 
 ```json
 {
@@ -125,15 +123,15 @@ Hook and strip both use `~/.claude/session-lights/` (inside `CLAUDE_CONFIG_DIR` 
 | Field | Required | Meaning |
 |---|---|---|
 | `sessionId` | yes | stable id; one file per session |
-| `name` | yes | shown in bold, cut to about 10 characters at a word end; in full on hover |
+| `name` | yes | shown cut to about 10 characters at a word end; in full on hover |
 | `state` | yes | `busy`, `idle`, `waiting` or `failed`; anything else shows a grey dot |
 | `since` | no | RFC 3339 time the state began |
 | `detail` | no | shown on hover, cut to 80 characters |
 | `window.hwnd` | no | the terminal's top-level window handle; enables click-to-focus and the ring |
-| `pid` | no | the `claude.exe` process; its death hides the box |
+| `pid` | no | the `claude` process; its death hides the session |
 | `pidStart` | no | that process's start time in unix ms, so a reused PID is not mistaken for the session |
 
-Running sub-agents are not a field: the hook keeps one empty file per agent id in `<session>.agents/` beside the light (SubagentStart adds it, SubagentStop removes it) and the strip counts them, so agents started in parallel cannot lose a count.
+Running sub-agents are not a field: the hook keeps one empty file per agent id in `<session>.agents/` beside the light, and the viewer counts them, so agents started in parallel cannot lose a count. When a turn ends with no agent-capable background task still running, the hook clears any markers a missed `SubagentStop` left behind.
 
 A file without a `pid` is hidden once it hasn't been modified for 30 minutes. Files are re-read as soon as they change, and a half-written file is skipped until the next write.
 
@@ -142,24 +140,43 @@ Saved positions go next to the lights folder, as `session-lights-go-pinned.json`
 ## Flags
 
 - `-dir <folder>` reads light files from another folder (default `~/.claude/session-lights`).
-- `-vd <VirtualDesktop.exe>` pins one strip to every desktop and makes clicking a session switch desktop first. It needs [MScholtes/VirtualDesktop](https://github.com/MScholtes/VirtualDesktop): `VirtualDesktop.exe` on Windows 10, `VirtualDesktop11.exe` on Windows 11, `VirtualDesktop11-24H2.exe` on 24H2 and later. The desktop in front is read from Explorer's `SessionInfo<n>VirtualDesktopsCurrentVirtualDesktop` registry value, which Explorer rewrites on every switch.
-- `-log <file>` writes a debug log: the desktop id, position restores, and the frame count every 5 seconds.
+- `-vd <VirtualDesktop.exe>` (Windows) pins one strip to every desktop and makes clicking a session switch desktop first. It needs [MScholtes/VirtualDesktop](https://github.com/MScholtes/VirtualDesktop): `VirtualDesktop.exe` on Windows 10, `VirtualDesktop11.exe` on Windows 11, `VirtualDesktop11-24H2.exe` on 24H2 and later.
+- `-once <duration>` prints one stats sample taken over that interval and exits.
+- `-log <file>` writes a debug log.
+
+## Build it yourself
+
+You need [Go](https://go.dev/dl/) 1.26 or later. No C compiler: both builds are pure Go.
+
+```
+git clone https://github.com/Carltk/sessionlights
+cd sessionlights
+GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-H windowsgui -s -w" -o bin/sessionlights.exe .
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/sessionlights .
+```
+
+Those commands are for Git Bash or a Linux shell. In PowerShell, set `$env:GOARCH="amd64"; $env:CGO_ENABLED="0"` first. `-H windowsgui` stops a console window opening alongside the strip, and when the exe runs as a hook. `-trimpath` keeps your own folder names out of the binary. Close any running strip before rebuilding, because Windows won't replace a running exe.
+
+To try your build as the plugin, point Claude Code at the folder: `claude --plugin-dir <path to the clone>` for one session, or `/plugin marketplace add <path to the clone>` to install it.
+
+The hook command in `hooks/hooks.json` names `bin/sessionlights` with no extension and passes its argument in `args`, so Claude Code starts it directly rather than through a shell. Windows then runs the `.exe` beside it, and Linux runs the extension-less binary.
 
 ## Notes for hacking on it
 
-- `lights.go` is the platform-neutral view model and is covered by `go test`.
-- `win_windows.go` is the Windows glue: process checks, `IVirtualDesktopManager`, focusing and positioning. Desktop order and names are not in that interface, so they come from Explorer's `VirtualDesktops` registry key.
-- `ui.go` is the Gio layout, and `main.go` wires it together.
-- `hook.go` is the producer (`sessionlights hook`), covered by `go test`; `hook_windows.go` finds the session's `claude.exe` and the terminal window hosting its console.
-- Build with `GOARCH=amd64` spelled out if your environment might set another architecture; a 32-bit build fails at runtime.
+- `lights.go` is the platform-neutral view model; `stats.go` holds the stat bands and formatting. Both are covered by `go test`.
+- `hook.go` is the producer (`sessionlights hook`), covered by `go test`; `hook_windows.go` finds the session's `claude.exe` and the terminal window hosting its console, and `proc_linux.go` does the same from `/proc`.
+- Windows: `ui.go` is the Gio layout, `main.go` wires it together, `win_windows.go` is the window glue (process checks, `IVirtualDesktopManager`, focusing, positioning), `stats_windows.go` samples the stats and `tooltip_windows.go` is the hover tip.
+- Linux: `main_linux.go` runs the bar, `tray_linux.go` is the StatusNotifierItem, `render.go` draws the segments, `stats_linux.go` samples `/proc` and `/sys`, and `install_linux.go` is `install`/`uninstall`.
+- `tools/icon/` draws the plugin icon.
+- Build with `GOARCH=amd64` spelled out if your environment might set another architecture; a 32-bit Windows build fails at runtime.
 
 Gio v0.10.3 on Windows has a few traps, worked around here:
 
 - `app.TopMost(true)` stops the window going top-most at all, so top-most is set on the window handle instead.
 - Calling a message-sending Win32 function from the `w.Event()` loop deadlocks, because the window thread is waiting on that loop. Such calls go through `go w.Run(...)`.
+- Only the window thread is DPI-aware, so screen coordinates are read and used inside `w.Run`.
+- Windows will not shrink an overlapped window below about 47 px, so the strip resizes itself as a popup window.
 - A drag area on top of clickable content swallows the clicks, which is why the strip drags from a grip.
-
-Linux isn't supported yet. Only the window glue would need a Linux counterpart, and on Wayland a normal window can't place itself or stay on top.
 
 ## Licence
 
