@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],
@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],
@@ -89,7 +89,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],
@@ -103,7 +103,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],
@@ -117,7 +117,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],
@@ -131,7 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights.exe",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
             "args": [
               "hook"
             ],

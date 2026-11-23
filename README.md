@@ -1,6 +1,6 @@
 # SessionLights
 
-A tiny always-on-top strip for Windows that shows what each of your [Claude Code](https://code.claude.com) sessions is doing: one box per session, with a dot coloured by its state. You can see at a glance which session is waiting on you without cycling through terminal tabs.
+A tiny always-on-top strip for Windows (and a top-panel bar on Linux) that shows what each of your [Claude Code](https://code.claude.com) sessions is doing: one box per session, with a dot coloured by its state. You can see at a glance which session is waiting on you without cycling through terminal tabs.
 
 | Dot | Meaning |
 |---|---|
@@ -64,11 +64,11 @@ On Claude Code 2.1.275 or later, `/plugin install sessionlights --marketplace Ca
 
 That gives you everything, with no Go and nothing else to install:
 
-- **The hook.** Every session reports its state to the strip from then on. Sessions that were already open start reporting once they are restarted.
-- **The `/lights` skill.** Type `/lights`, or ask Claude to "show the session lights", to start a strip on the desktop you are on.
-- **The exe**, `bin/sessionlights.exe`, which is both the strip and the hook.
+- **The hook.** Every session reports its state from then on. Sessions that were already open start reporting once they are restarted.
+- **The `/lights` skill.** Type `/lights`, or ask Claude to "show the session lights". On Windows it starts a strip on the desktop you are on. On Linux it runs `sessionlights install` (once is enough, but it is safe to repeat) and starts the bar.
+- **The binaries**: `bin/sessionlights.exe` for Windows and `bin/sessionlights` for Linux (x86-64). Each is both the viewer and the hook. The hook command names `bin/sessionlights` with no extension, and Windows runs the `.exe` beside it.
 
-To start a strip at login, put a shortcut to the plugin's `bin/sessionlights.exe` in `shell:startup`. `/plugin` shows where the plugin is installed.
+To start a strip at login on Windows, put a shortcut to the plugin's `bin/sessionlights.exe` in `shell:startup`. On Linux, `/lights` sets up the autostart for you. `/plugin` shows where the plugin is installed.
 
 ## Build it yourself
 
@@ -81,6 +81,12 @@ GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-H windowsgui -s -w" -o 
 ```
 
 Those commands are for Git Bash. In PowerShell, set `$env:GOARCH="amd64"; $env:CGO_ENABLED="0"` first. `-H windowsgui` stops a console window opening alongside the strip, and when the exe runs as a hook. `-trimpath` keeps your own folder names out of the binary. Close any running strip before rebuilding, because Windows won't replace a running exe.
+
+The plugin's Linux binary is a cross-build from the same tree:
+
+```
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/sessionlights .
+```
 
 To use your build as the plugin, point Claude Code at the folder: `claude --plugin-dir <path to the clone>` for one session, or `/plugin marketplace add <path to the clone>` to install it.
 

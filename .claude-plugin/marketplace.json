@@ -5,7 +5,7 @@
     {
       "name": "sessionlights",
       "source": "./",
-      "description": "An always-on-top Windows strip with one coloured light per Claude Code session."
+      "description": "One coloured light per Claude Code session: an always-on-top strip on Windows, a stats bar in the top panel on Linux."
     }
   ]
 }
