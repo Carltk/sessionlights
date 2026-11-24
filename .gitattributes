@@ -1,0 +1,6 @@
+# LF everywhere, on every checkout. The launcher runs under sh on Windows,
+# and the Linux binary embeds gnome-extension/: a CRLF checkout would break
+# the one and change the checksum of the other.
+* text=auto eol=lf
+*.png binary
+*.exe binary

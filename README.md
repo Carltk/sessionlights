@@ -31,7 +31,7 @@ The plugin gives you:
 
 - **The hook.** Every session reports its state from then on. Sessions that were already open start reporting once they are restarted.
 - **The `/lights` skill.** Type `/lights`, or ask Claude to "show the session lights". On Windows it starts a strip on the desktop you are on. On Linux it runs `sessionlights install` (once is enough, but it is safe to repeat) and starts the bar.
-- **The binaries**: `bin/sessionlights.exe` for Windows and `bin/sessionlights` for Linux. Each is both the viewer and the hook.
+- **The binary**: `bin/sessionlights.exe` on Windows, `bin/sessionlights` on Linux. Each is both the viewer and the hook. The plugin itself ships no executables. The first session after an install or update runs `hooks/ensure.sh`, which downloads that version's binary from this repo's [GitHub release](https://github.com/Carltk/sessionlights/releases) and installs it only if its SHA-256 matches the one pinned in [`hooks/SHA256SUMS`](hooks/SHA256SUMS). That needs `sh` and `curl` or `wget` (Git for Windows brings both), plus network access once per version. If that first download fails, nothing is installed and the next session start tries again, or `/lights` fetches it. Until then the other hooks report a "hook error" on each event, because their command is missing. The session itself is not affected. The plugin makes no other network calls.
 
 To start the strip at login on Windows, put a shortcut to the plugin's `bin/sessionlights.exe` in `shell:startup`. The plugin's folder is per version, so make the shortcut again after a plugin update. On Linux, `/lights` sets up the autostart for you: it copies the binary out of the plugin cache to `~/.local/share/sessionlights/` and points autostart there, so an update does not break it, and each `/lights` refreshes the copy. `/plugin` shows where the plugin is installed.
 
@@ -155,20 +155,32 @@ Saved positions go next to the lights folder, as `session-lights-go-pinned.json`
 
 ## Build it yourself
 
-You need [Go](https://go.dev/dl/) 1.26 or later. No C compiler: both builds are pure Go.
+You need [Go](https://go.dev/dl/) 1.26 or later (`tools/build.sh` uses exactly the version in `go.mod`, and fetches it if yours differs). No C compiler: both builds are pure Go.
 
 ```
 git clone https://github.com/Carltk/sessionlights
 cd sessionlights
-GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-H windowsgui -s -w" -o bin/sessionlights.exe .
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/sessionlights .
+sh tools/build.sh
 ```
 
-Those commands are for Git Bash or a Linux shell. In PowerShell, set `$env:GOARCH="amd64"; $env:CGO_ENABLED="0"` first. `-H windowsgui` stops a console window opening alongside the strip, and when the exe runs as a hook. `-trimpath` keeps your own folder names out of the binary. Close any running strip before rebuilding, because Windows won't replace a running exe.
+Run that from Git Bash or a Linux shell. It builds both binaries into `dist/`, copies them into `bin/`, and rewrites `hooks/SHA256SUMS`. `-H windowsgui` stops a console window opening alongside the strip, and when the exe runs as a hook. `-trimpath` keeps your own folder names out of the binary. Close any running strip before rebuilding, because Windows won't replace a running exe.
 
-To try your build as the plugin, point Claude Code at the folder: `claude --plugin-dir <path to the clone>` for one session, or `/plugin marketplace add <path to the clone>` to install it.
+The build is reproducible: the same source and the Go version named in `go.mod` give the same bytes on any machine. That is what lets the plugin pin checksums for binaries that GitHub builds.
 
-The hook command in `hooks/hooks.json` names `bin/sessionlights` with no extension and passes its argument in `args`, so Claude Code starts it directly rather than through a shell. Windows then runs the `.exe` beside it, and Linux runs the extension-less binary.
+To try your build as the plugin, point Claude Code at the folder: `claude --plugin-dir <path to the clone>` for one session, or `/plugin marketplace add <path to the clone>` to install it. The launcher never replaces a binary that is already in `bin/`, so your build is the one that runs.
+
+## Releasing
+
+1. Bump `version` in `.claude-plugin/plugin.json`. Claude Code only offers an update when it changes.
+2. Run `sh tools/build.sh` and commit, including `hooks/SHA256SUMS`.
+3. Tag and push **the tag only**: `git tag v1.2.0 && git push origin v1.2.0`.
+4. Once the release shows up with both binaries (`gh release view v1.2.0`), push main: `git push origin main`.
+
+The order matters because the marketplace serves `main`. If `main` names a version before its release exists, installs and updates of that version find nothing to download.
+
+The [build workflow](.github/workflows/release.yml) runs the tests, rebuilds both binaries on GitHub, and stops if their checksums differ from the committed `hooks/SHA256SUMS`. It also stops when the version in `plugin.json` is already released with different binaries, so a code change without a version bump fails CI instead of breaking fresh installs. On a `v*` tag it checks the tag against `plugin.json`, then a separate job (the only one allowed to write) publishes the release with both binaries and `SHA256SUMS`.
+
+SessionStart goes through `sh hooks/ensure.sh hook`, which makes sure the binary is there and then runs it. Every other hook command in `hooks/hooks.json` names `bin/sessionlights` with no extension and passes its argument in `args`, so Claude Code starts it directly rather than through a shell. Windows then runs the `.exe` beside it, and Linux runs the extension-less binary.
 
 ## Notes for hacking on it
 
@@ -176,7 +188,7 @@ The hook command in `hooks/hooks.json` names `bin/sessionlights` with no extensi
 - `hook.go` is the producer (`sessionlights hook`), covered by `go test`; `hook_windows.go` finds the session's `claude.exe` and the terminal window hosting its console, and `proc_linux.go` does the same from `/proc`.
 - Windows: `ui.go` is the Gio layout, `main.go` wires it together, `win_windows.go` is the window glue (process checks, `IVirtualDesktopManager`, focusing, positioning), `stats_windows.go` samples the stats and `tooltip_windows.go` is the hover tip.
 - Linux: `main_linux.go` runs the bar, `tray_linux.go` is the StatusNotifierItem, `render.go` draws the segments, `stats_linux.go` samples `/proc` and `/sys`, and `install_linux.go` is `install`/`uninstall`.
-- `tools/icon/` draws the plugin icon.
+- `tools/icon/` draws the plugin icon; `tools/build.sh` makes the release binaries and `hooks/SHA256SUMS`; `hooks/ensure.sh` is the plugin's download-on-first-run launcher.
 - Build with `GOARCH=amd64` spelled out if your environment might set another architecture; a 32-bit Windows build fails at runtime.
 
 Gio v0.10.3 on Windows has a few traps, worked around here:

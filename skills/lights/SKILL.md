@@ -10,6 +10,19 @@ shell's PATH, so `sessionlights` (Linux) and `sessionlights.exe` (Windows) run
 without a path. If the command is not found, the binaries are in
 `${CLAUDE_PLUGIN_ROOT}/bin/`; use the full path instead.
 
+The plugin ships no binaries: the first session after an install or update
+downloads this version's binary from the GitHub release, checked against the
+SHA-256 pinned in `hooks/SHA256SUMS`. If `bin/` has no `sessionlights` /
+`sessionlights.exe` yet (offline at that session start, say), fetch it now and
+pass on anything it prints to stderr:
+
+```
+sh "${CLAUDE_PLUGIN_ROOT}/hooks/ensure.sh"
+```
+
+Exit 0 means the binary is in place. Exit 1 means the download or the checksum
+failed, and nothing was installed.
+
 Starting it twice is safe: a second copy that would duplicate a running one
 exits by itself, so "nothing new appeared" is a success, not a failure.
 

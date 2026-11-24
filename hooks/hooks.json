@@ -5,11 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/sessionlights",
-            "args": [
-              "hook"
-            ],
-            "timeout": 5
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/ensure.sh\" hook",
+            "timeout": 90
           }
         ]
       }

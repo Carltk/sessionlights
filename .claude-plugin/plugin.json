@@ -1,6 +1,6 @@
 {
   "name": "sessionlights",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "One coloured light per Claude Code session (busy, idle, waiting on you, or failed): an always-on-top strip on Windows, a stats bar in the top panel on Linux. Windows and x86-64 Linux only.",
   "author": { "name": "Carltk", "url": "https://github.com/Carltk" },
   "homepage": "https://github.com/Carltk/sessionlights",
